@@ -31,18 +31,27 @@
 }
 
 /*
- * htmx's loading indicator. These three rules are htmx's own defaults, moved
- * here because htmx would otherwise inject them as an inline <style> block,
- * which the Content-Security-Policy blocks -- see the config meta tag in
- * layout.html. Design them; do not delete them, or hx-indicator stops doing
- * anything and section 6 of the frontend brief quietly stops being true.
+ * htmx's loading indicator -- htmx's own default rules, copied verbatim from
+ * the vendored file, because htmx would otherwise inject them as an inline
+ * <style> block that the Content-Security-Policy blocks (see the config meta
+ * tag in layout.html).
+ *
+ * Design them freely, but keep BOTH halves of each rule. opacity alone looks
+ * like it is enough and is not: a fully transparent element is still
+ * hit-testable, so it swallows clicks on whatever sits under it, and is still
+ * in the accessibility tree, so a screen reader announces a spinner that is
+ * not there. visibility is what removes it from both. Deleting these rules
+ * altogether leaves hx-indicator doing nothing, and section 6 of the frontend
+ * brief requires it to do something.
  */
 .htmx-indicator {
     opacity: 0;
-    transition: opacity 200ms ease-in;
+    visibility: hidden;
 }
 
 .htmx-request .htmx-indicator,
 .htmx-request.htmx-indicator {
     opacity: 1;
+    visibility: visible;
+    transition: opacity 200ms ease-in;
 }

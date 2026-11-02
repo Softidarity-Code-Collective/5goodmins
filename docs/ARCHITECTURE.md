@@ -800,6 +800,12 @@ A developer who needs an account registers one at `/register` and clicks the lin
 
 **Editing it after it has run is a checksum failure, not an edit** — the ordinary Flyway discipline, inherited by choosing an ordinary migration. Locally that means `docker compose down -v`; once Railway has it, more content is a `V101`.
 
+**Which means the catalogue has a shelf life, and "the dates are relative" does not settle it.** `now()` in a versioned migration is evaluated once, when Flyway applies the file to that database. Relative dates stop the failure §4 names — a catalogue authored with fixed literals is expired before it is ever deployed — but from the moment V100 runs on Railway, the end dates are fixed timestamps counting down. The first version of this seed had 22 of its 31 actions ending within 60 days of that moment and all of them within five, which would have emptied the portfolio site in the middle of the job hunt it exists for, silently, with nothing in the logs.
+
+So the spread is deliberate and it is stated here rather than left to be read off the file: one action deliberately expired, three in the next 30–60 days so the "ends soon" states are designable, and **the remaining 27 between 180 and 360 days** — the ceiling being the one-year maximum the service layer enforces on real submissions, which demo content has no business exceeding.
+
+**A `V101` refresh is therefore due within six months of the first Railway deploy**, and the catalogue is empty at twelve. It is not a reminder anybody will remember, so it is a number instead: `SELECT count(*) FROM action WHERE status = 'PUBLISHED' AND ends_at > now();` returns 27 on deploy day and 24 six months later. When it is under 20, write the V101. The same arithmetic applies to `published_at` — "published 3 days ago" ages into "published eight months ago", which is cosmetic and does not change the ordering, so it is not what triggers the refresh.
+
 ---
 
 ## 4. MVP scope — what's cut

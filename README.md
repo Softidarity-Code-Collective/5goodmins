@@ -97,6 +97,14 @@ Re-seeding after editing `V100__` means starting the database over —
 `docker compose down -v` — because a versioned migration that has already run
 is frozen by its checksum.
 
+The demo catalogue counts down from the moment Flyway applies it: 27 published
+actions are live on deploy day, 24 of them are still live six months later,
+and all of them have expired by twelve. Refreshing it is a `V101`, due when this drops below ~20:
+
+```bash
+docker compose exec db psql -U app -d fivegoodmins -c "select count(*) from action where status = 'PUBLISHED' and ends_at > now();"
+```
+
 **Templates, CSS and JavaScript reload on save** — no restart, no rebuild. The
 `dev` profile points Thymeleaf and the static resource handler at
 `src/main/resources` instead of the compiled copy under `target/`, and the
