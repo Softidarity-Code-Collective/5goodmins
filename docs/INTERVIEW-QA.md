@@ -1082,6 +1082,33 @@ state it in a review: a legitimate user behind a shared carrier-grade NAT
 address, refused for something a neighbour did, is told to wait without being
 told how long.
 
+### Q: Where does the action list keep its filter state? **[WARM]**
+
+In the URL, and that is the decision the rest of page 1 falls out of
+(ADR-022). `GET /actions?category=HUMAN_RIGHTS&region=SOFIA&q=...&page=2`.
+Not the session, not a POST body, not a cookie.
+
+The product reason is that a filtered list is a thing people send each other
+— "all the environmental petitions in Plovdiv" is a link in a group chat, and
+a directory whose filters live in my session cannot produce that link. The
+technical dividends are free rather than designed: the back button works
+because every filter change is a history entry, two tabs with two filter sets
+do not fight over one server-side value, an anonymous visitor needs no session
+to use the main page, and the language switcher already round-trips the whole
+query string, so a filtered list survives switching to English without a line
+of new code. Filter state in a POST body is the version that would have broken
+that last one.
+
+The part I would raise before being asked: it means the same route serves two
+things, a full page and an htmx fragment, branching on the `HX-Request`
+header. I chose that over a second `/actions/results` path so the URL htmx
+fetches and the URL pushed into the address bar are the same string — one
+place building the query, and a pushed URL that still works when pasted into a
+fresh tab. The cost is a `Vary: HX-Request` on the response, which is not
+optional with Cloudflare in front: without it a cached fragment eventually
+gets served to a browser that asked for the page, and the symptom is a blank
+screen rather than an error.
+
 ### Q: Why two buckets on registration? **[DEEP]**
 
 Because they defend different things, and only one of them defends *me*.

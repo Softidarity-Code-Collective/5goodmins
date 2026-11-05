@@ -53,6 +53,7 @@ Everything Rev 1 got right is kept and marked **Accepted**. The rest is marked *
 | 19 | Time enters through one injected `Clock`; no `Instant.now()` in place | New (Rev 13) |
 | 20 | Content-Security-Policy `default-src 'self'`; static assets and htmx self-hosted | New (Rev 25) |
 | 21 | Demo seed data ships to every environment as `V100__`; only the test config omits it | New (Rev 25), corrected (Rev 26–27) |
+| 22 | Page 1's URL contract: filter state in the query string, one route with an `HX-Request` branch | **Draft (Rev 30)** — four product questions open |
 | 5b | Dev mail: Mailpit behind an `EmailSender` interface; PostgreSQL pinned to 18 | Resolved (Rev 9) |
 
 ---
@@ -848,6 +849,92 @@ So the spread is deliberate and it is stated here rather than left to be read of
 
 **A `V101` refresh is therefore due within six months of the first Railway deploy**, and the catalogue is empty at twelve. It is not a reminder anybody will remember, so it is a number instead: `SELECT count(*) FROM action WHERE status = 'PUBLISHED' AND ends_at > now();` returns 27 on deploy day and 24 six months later. When it is under 20, write the V101. The same arithmetic applies to `published_at` — "published 3 days ago" ages into "published eight months ago", which is cosmetic and does not change the ordering, so it is not what triggers the refresh.
 
+### ADR-022 — Page 1's URL contract: filters, search, paging, and the htmx fragment
+
+**Status:** New (Rev 30). **Draft on four points** — the four marked *Open* at the bottom are product decisions, not technical ones, and the controller should not be written until they are answered. Everything else here is decided.
+
+This is the thing the frontend contributor is blocked on, and it is written before the controller rather than discovered during it, because the parameter names appear in markup the contributor writes (`hx-get`, the filter form's field names, the pagination links) and renaming them later is a diff across both sides.
+
+**The decision in one line: the URL is the state. Everything else follows from that.**
+
+```
+GET /actions?category=HUMAN_RIGHTS&category=ENVIRONMENT&region=SOFIA&type=PETITION&q=петиция&page=2
+```
+
+No `POST` for a filter change, no filter state in the session, no state in a cookie, nothing in a path segment. Five things fall out of it and they are the whole argument:
+
+- A filtered list is **shareable and bookmarkable**, which is the point of a directory of actions — "all the environmental petitions in Plovdiv" is a link somebody sends to a group chat.
+- The **back button works** without a single line of JavaScript, because every filter change is a history entry (`hx-push-url="true"`).
+- **The language switcher already round-trips it.** `LocaleSwitch` rebuilds the current URL with `?lang=` replaced and passes the rest of the query string through untouched, so a filtered list survives switching to English with no work at all. Filter state in the session would survive it too; filter state in a POST body would not, and that is the shape that would have forced a change there.
+- A crawler and the eventual JSON API see **the same vocabulary**. ADR-001's read-only API reuses these parameter names when it lands; one set of names, one thing to document.
+- **Nothing per-visitor is stored server-side**, so two tabs with two different filter sets do not fight, and an anonymous visitor needs no session to use the main page.
+
+#### The parameters, exactly
+
+| Parameter | Form | Default |
+|---|---|---|
+| `category` | repeatable; enum constant names (`HUMAN_RIGHTS`) | absent = no constraint |
+| `region` | repeatable; enum constant names (`STARA_ZAGORA`) | absent = no constraint |
+| `type` | repeatable; enum constant names (`PETITION`) | absent = no constraint |
+| `q` | free text, trimmed, capped at 100 characters | absent = no search |
+| `page` | 1-based page number | `1` |
+
+- **Enum constant names in the URL, never the Bulgarian label and never an ordinal.** The label is a translation and would change the URL's meaning when it changes; an ordinal is the thing `@Enumerated(EnumType.STRING)` exists to avoid (§2). The constant is already the value in the database and the key in the bundles (`category.HUMAN_RIGHTS`), so the URL, the column and the message key all say the same word.
+- **Repeated parameters, not a comma-separated list.** `category=A&category=B` is what an HTML form with checkboxes submits with no JavaScript involved, which matters because the form has to work with htmx absent (below). A comma list would need the form rewritten in JS to build it.
+- **An empty value is absent, not a filter on nothing.** `?category=` arrives from a form with nothing checked and must mean "no constraint", not "actions whose category is the empty string". There is no `all` sentinel for the same reason: absence already says it.
+- **Parsed into an `EnumSet`, which is the cap.** Deduplication and an upper bound of the enum's own size come free from the type, so `?region=SOFIA` repeated ten thousand times is a URL anybody can write and is still at most 30 values in the `IN` list. This is cheaper than validating a length and is the reason no "max values per facet" number appears anywhere.
+- **`page` is a page number; `size` is not a parameter.** A visitor-supplied page size is a free heavy query — `?size=100000` — and there is no use case for it. 20 per page, in one constant.
+- **`page` past the end renders the empty state, not a 404.** It is the same state as "filters match nothing", which the brief already asks for; a 404 would be a different page for a difference the visitor cannot see.
+- **`q` is capped at 100 characters and truncated rather than rejected**, because a full-text query built from 5,000 characters is a cost a URL should not be able to choose, and a visitor who pasted an essay into the search box wants results rather than an error page.
+
+#### Facet semantics: OR inside a facet, AND across facets
+
+`category=HUMAN_RIGHTS&category=ENVIRONMENT&region=SOFIA` means *(human rights **or** environment) **and** Sofia*.
+
+This is the conventional reading of faceted search and it is also the only one that is not actively hostile: AND inside a facet would mean the second checkbox a visitor ticks almost always narrows the list to nothing, because an action carries one to three categories, not all of them (ADR-009, ADR-017).
+
+**The part with a database consequence:** categories and regions are element collections, one row per tag, so filtering on them with a join returns an action once per matching tag — the row multiplication ADR-005 already avoids in the digest. Each facet is therefore an `EXISTS` subquery, not a join, and `idx_action_category_category` / `idx_action_region_region` are the indexes that serve them. Three facets is three `EXISTS` clauses, each one skipped entirely when its parameter is absent.
+
+#### One route, two renderings
+
+`GET /actions` serves the full page to a browser and **the results fragment alone** when the request carries htmx's `HX-Request` header. Not a second path.
+
+- The URL htmx fetches and the URL in the address bar are then **the same string**, so `hx-push-url="true"` has nothing to translate, and pasting the pushed URL into a new tab serves the full page rather than a naked fragment.
+- A second path (`/actions/results`) would mean the query string is built twice in the template — once for the fetch, once for the pushed URL — and the two drifting apart is a bug nobody sees until a filter silently stops being shareable.
+- **The cost, stated: the response now varies on a request header, so it carries `Vary: HX-Request`.** Cloudflare sits in front of this (ADR-004), and a cached fragment served to a browser asking for the page is a blank screen. This is the one line that is easy to leave out and expensive to debug, which is why it is in the ADR rather than only in the code.
+
+The swap contract, which is what the markup has to agree with:
+
+| | |
+|---|---|
+| Target | `#action-results` |
+| Swap | `innerHTML` |
+| Fragment | `action/list :: results` |
+| Push URL | yes (`hx-push-url="true"`) |
+
+**What is inside the fragment and what is outside it is a decision, not an accident.** Inside: the result count, the active-filter summary, the cards, the empty state, the pagination. Outside: the filter sidebar itself. The sidebar holds the inputs the visitor is interacting with — re-rendering it mid-keystroke would move focus and lose a half-typed search term — and it is already the source of truth for what is checked. The active-filter summary is *inside* precisely because it must never disagree with the result set it describes: one response produces both.
+
+- The filter form is a real `<form method="get" action="/actions">` with a visible submit button, and `hx-get` on the form element so every input serializes from one place with no `hx-include` list to maintain. **With htmx absent the page still works** — a full reload per filter change, which is the correct degradation and costs nothing to keep, given that the contract is already "the URL is the state".
+- Filters trigger on `change`; search on `hx-trigger="keyup changed delay:300ms, search"`. Both are modifiers rather than expressions, so neither needs the `allowEval` features ADR-020's CSP switches off.
+- `hx-indicator` on the results region, and the pagination links are `hx-get` against the same route with `page=` replaced.
+
+#### Still newest-first, and the tiebreaker is not optional
+
+`ORDER BY published_at DESC, id DESC` with no `q`, matching `idx_action_published` exactly so the sort comes from the index scan. The tiebreaker is the rule the whole project already follows and offset paging is what makes it load-bearing rather than tidy: without it, two actions published in the same transaction can swap places between the request for page 1 and the request for page 2, and one of them is then on neither page. Ordering under search is *Open*, below.
+
+#### What this ADR does not decide
+
+- **Dates on screen.** The display timezone, the formatter and "ends in 3 days" are a separate ADR, owed before page 2.
+- **The detail page's URL.** Page 2's route and `ActionPaths.detail` land together, with nothing already in a mailbox depending on the answer.
+- **The JSON API's own path and shape** (ADR-001). It reuses these parameter names; it does not otherwise exist yet.
+
+#### Open — the four the controller waits on
+
+1. **Pagination style.** Numbered pages (offset + a `count(*)` per request, which is what the brief's pagination fragment needs) or "load more" (keyset on `(published_at, id)`, no count, no page numbers, and a back button that returns you to the top of the list)? Recommendation: numbered. The count is free at hundreds of rows, keyset is the thing to switch to when it stops being free, and the index already carries the right columns for either.
+2. **Ordering under search.** When `q` is present, order by relevance — `ts_rank` over the weights ADR-007 deliberately set, so a title hit outranks a body hit — or stay newest-first always? Recommendation: relevance when searching, newest-first otherwise, `id DESC` as the tiebreaker in both. The weights exist for this and are otherwise paid for and unused; the cost is a second ordering and an index path that does not come free from `idx_action_published`.
+3. **One facet value at a time, or several?** The contract above assumes checkboxes. Single-select (a `<select>` per facet) is a smaller sidebar on mobile and a simpler URL, and it is a real product answer for a directory this size. Recommendation: multi-select, because an action carries up to three regions and a visitor in Sofia who also wants national actions is the common case, not an edge one.
+4. **An unrecognized enum value in the URL.** Drop it and show the broader result set, or answer `400`? Recommendation: drop it, and render the active-filter summary from the *parsed* values so the page can never show a chip it did not filter on. Links outlive deployments — a digest email, a bookmark, a renamed constant — and a stale link degrading to more results is better than one landing on an error page. The cost is that a typo in a hand-edited URL is silent, which is a cost worth paying for the links nobody will edit again.
+
 ---
 
 ## 4. MVP scope — what's cut
@@ -951,6 +1038,8 @@ Full Q&A in `docs/INTERVIEW-QA.md`. The headline list:
 ---
 
 ## 8. Changelog
+
+- **Rev 30 (2026-11-05):** **ADR-022, page 1's URL contract**, written before the controller rather than during it, because the parameter names appear in markup the frontend contributor writes and renaming them later is a diff across both sides — it was the one thing that work was blocked on. The decision is that **the URL is the state**: filters, search and page in the query string of `GET /actions`, nothing in the session, nothing in a POST, nothing in a path segment. What that buys is a shareable filtered list, a working back button for free, and a language switcher that already round-trips the whole query string without a change to `LocaleSwitch`. Three details carry their own reasons: repeated parameters rather than a comma list, because that is what a checkbox form submits with no JavaScript; an `EnumSet` as the parse target, because deduplication and an upper bound of the enum's own size come free from the type, so a URL repeating one facet ten thousand times is still at most 30 values in the `IN` list; and **one route with an `HX-Request` branch rather than a second fragment path**, so the fetched URL and the pushed URL are the same string — at the cost of `Vary: HX-Request`, which matters because Cloudflare is in front of this and a cached fragment served to a browser asking for the page is a blank screen. Facet semantics are OR inside a facet and AND across facets, which the element-collection schema makes three `EXISTS` subqueries rather than three joins, for the row-multiplication reason ADR-005 already states about the digest. **The ADR is deliberately a draft on four points** — pagination style, ordering under search, multi- versus single-select, and what an unrecognized enum value in a URL should do — because all four are product answers rather than technical ones, each is recorded with a recommendation and its cost, and the controller should not be written until they are settled. Docs only in this revision; no code.
 
 - **Rev 29 (2026-11-05):** `templates/error/429.html` and its three strings, which is Rev 28's one named gap closed: ADR-002 had routed the refusal through the error dispatch so it would inherit a template, and the template was the half nobody had written. **The copy is the work and its one decision is to name no interval** — a number would publish the shape of the bucket, there is no honest single number for a template that serves a fifteen-minute login window and an hour-long registration window, and the page cannot read back the `Retry-After` anyway. **The test is not in `ErrorPagesTest`, for two reasons worth stating.** A 429 needs `app.rate-limit.refuse-requests=true`, which the suite switches off globally, so asserting it there would fork a Spring context whose setup is about the limiter rather than about error pages; `RateLimitHttpTest` already runs that context and already posts until it is refused. And the page assertion goes through `/register` rather than `/login`, which was **measured rather than foreseen**: a bucket is process-wide state keyed on the client address, both methods run against one limiter bean from one `127.0.0.1` over a window longer than the build, and the first version of this test spent the allowance the header test measures — whichever ran second failed on its first assertion. The two request-refusing buckets are independent, so the tests now share a context and nothing else. Confirmed by deleting the template and watching the whitelabel page come back, which is the only thing that proves the assertion reaches the file. 327 tests, up from 326.
 

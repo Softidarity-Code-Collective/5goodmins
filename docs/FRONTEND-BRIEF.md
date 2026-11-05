@@ -112,10 +112,13 @@ freely.
   formatter, and no strings for "ends in 3 days". Page 2 and page 12 need
   them; they arrive with the action list rather than before it. Leave a slot,
   do not invent a format.
-- **The filter and pagination URL contract** for page 1 — which parameters,
-  which htmx target, which fragment comes back. Decided when that controller
-  is written; it will follow the shape the style guide's htmx button already
-  demonstrates.
+- ~~**The filter and pagination URL contract** for page 1.~~ **Decided:
+  ADR-022.** Parameters, facet semantics, the swap target and the fragment
+  name are all in that ADR, and the table in page 1's row below is the short
+  version. Four product questions in it are still open — pagination style,
+  ordering under search, multi- versus single-select facets, and what a bad
+  value in a URL does — and the first and third change what you design, so
+  read them before you build the sidebar.
 - **Images.** ADR-006 settled on storage in Postgres served through a
   controller, but neither the table nor the upload exists yet. Section 7's
   default — text-only cards, one featured action with an image — is what to
@@ -318,7 +321,7 @@ valid title.
 
 | # | Page | Notes |
 |---|---|---|
-| 1 | **Action list / home** | *Placeholder built, everything that makes it page 1 is not.* The main page. Filters: category, region, type, free-text search. Sorted newest first, paginated. Filter changes swap the results list via htmx without a full reload. Needs: filter sidebar (drawer on mobile), result card, pagination, empty state, and an active-filter summary that can be cleared. **What exists today** is an unstyled list of the newest twenty published actions at `/actions`, built because the welcome email needs a destination (ADR-005) — no filters, no search, no htmx swapping, no pagination, and titles that are not yet links because the detail page is page 2. Those are absent rather than stubbed: a filter control that silently does nothing is worse than none. |
+| 1 | **Action list / home** | *Placeholder built, everything that makes it page 1 is not — but the URL contract now is (ADR-022).* The main page. Filters: category, region, type, free-text search. Sorted newest first, paginated. Filter changes swap the results list via htmx without a full reload. Needs: filter sidebar (drawer on mobile), result card, pagination, empty state, and an active-filter summary that can be cleared. **The contract to build against:** `GET /actions?category=&region=&type=&q=&page=` — repeatable parameters carrying enum constant names (`HUMAN_RIGHTS`, never the label), target `#action-results`, swap `innerHTML`, fragment `action/list :: results`, `hx-push-url="true"`, and the same route serves the fragment when htmx asks. The filter form is a real `<form method="get">` with `hx-get` on the form, so it works with htmx absent. The sidebar stays **outside** the swap (re-rendering it mid-keystroke moves focus); the active-filter summary goes **inside** it, so it cannot disagree with the results. **What exists today** is an unstyled list of the newest twenty published actions at `/actions`, built because the welcome email needs a destination (ADR-005) — no filters, no search, no htmx swapping, no pagination, and titles that are not yet links because the detail page is page 2. Those are absent rather than stubbed: a filter control that silently does nothing is worse than none. |
 | 2 | **Action detail** | Title, category/region/type badges, full description, image, optional embedded video, author link, end date with remaining time, and a prominent outbound call-to-action button ("Sign the petition" etc., label depends on type). **The link is optional — needs a second variant with no CTA button at all.** Secondary: share, report. |
 | 3 | **Poster profile** | Display name, bio, website link, list of that poster's published actions. |
 | 4 | **About** | Static content page. |
