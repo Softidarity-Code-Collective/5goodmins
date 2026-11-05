@@ -1054,6 +1054,34 @@ making two attempts a minute. Nothing per-IP does. The honest answer to that is
 Cloudflare Turnstile on the form, which is the next step I would take and have
 not taken.
 
+### Q: What does a rate-limited user actually see? **[WARM]**
+
+A real page in the site layout, and it tells them less than it could.
+
+The filter refuses by calling `sendError(429)` rather than writing a body,
+which routes the refusal through the servlet error dispatch and lands it on
+`templates/error/429.html` like any other error page. That was the point of
+doing it that way: writing the body in the filter would mean a user-facing
+string in Java, which this project forbids (ADR-008), or a blank page, which
+tells a human nothing.
+
+The copy says what happened, that it is temporary, and to come back later. It
+names **no interval**, and that is the part with a reason behind it. Two
+reasons, actually. A number on the page states the shape of the bucket, and
+the window is the one thing about this mechanism an attacker cannot already
+measure cheaply — they know they were refused, they do not know whether to
+come back in a minute or an hour. And there is no honest single number to
+print: one template serves a fifteen-minute login window and an hour-long
+registration window, and the template cannot read back the `Retry-After` the
+filter set, because Thymeleaf 3.1 removed the `#response` context object and
+the error dispatch carries no model attribute from the failed request.
+
+So the number lives in the header, where the clients that can act on it read
+it, and the page speaks to the human who cannot. The cost is real and I would
+state it in a review: a legitimate user behind a shared carrier-grade NAT
+address, refused for something a neighbour did, is told to wait without being
+told how long.
+
 ### Q: Why two buckets on registration? **[DEEP]**
 
 Because they defend different things, and only one of them defends *me*.

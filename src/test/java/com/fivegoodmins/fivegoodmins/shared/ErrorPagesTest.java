@@ -16,7 +16,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Page 19 of the frontend brief: 404 and 403 are real pages in the site
- * layout rather than Boot's whitelabel page.
+ * layout rather than Boot's whitelabel page. (500 has no test here -- making
+ * a real server throw would mean an endpoint that exists only to throw.)
  *
  * <p><strong>A real server, because MockMvc cannot see this.</strong> An
  * error page is rendered on the ERROR dispatch, and MockMvc does not perform
@@ -24,6 +25,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  * MockMvc test of an error page passes whether the template exists, is
  * missing, or throws halfway through rendering. That was measured here before
  * this file was written as it is.
+ *
+ * <p><strong>429 is tested elsewhere, and not by oversight.</strong>
+ * {@code error/429.html} is the fourth page and the only one not reachable by
+ * following a link: it needs ADR-002's limiter switched on, which the suite
+ * switches off in {@code src/test/resources/application.properties}, so
+ * turning it back on here would fork a Spring context whose setup is about
+ * the limiter. {@code RateLimitHttpTest} already runs that context and
+ * already posts until it is refused, so the page is asserted there.
  *
  * <p>The paths are under {@code /dev/**} for one reason: it is permitted in
  * {@code SecurityConfig}, and everything else currently falls through to

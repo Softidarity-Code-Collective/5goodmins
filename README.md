@@ -240,8 +240,9 @@ household 2^64 buckets. Buckets live in memory, so **every deploy resets
 them** — accepted for one instance, and the thing to fix alongside the
 scheduler if a second ever exists.
 
-A refusal is `429` with `Retry-After`, through the error dispatch, so it will
-inherit the real error page when that is built.
+A refusal is `429` with `Retry-After`, through the error dispatch, so it
+inherits `templates/error/429.html` like any other error page. The page names
+no interval on purpose: see ADR-002.
 
 **If login breaks for everybody, look here first.** The key depends on Tomcat's
 `RemoteIpValve` resolving past Cloudflare's edge to the real client. If it ever
