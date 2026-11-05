@@ -1,5 +1,6 @@
 package com.fivegoodmins.fivegoodmins.user;
 
+import com.fivegoodmins.fivegoodmins.action.ActionQueries;
 import com.fivegoodmins.fivegoodmins.shared.token.SignedTokenService;
 import com.fivegoodmins.fivegoodmins.shared.token.TokenPurpose;
 import com.fivegoodmins.fivegoodmins.shared.token.TokenVerification;
@@ -94,18 +95,39 @@ public class RegistrationService {
     /** varchar(254): the practical RFC 5321 maximum for an address. */
     private static final int MAX_EMAIL_LENGTH = 254;
 
+    /**
+     * How many actions the welcome email carries (ADR-005). Five, because it is
+     * a taste of the site rather than the site: a longer list in a first email
+     * is a longer thing not to read.
+     */
+    private static final int WELCOME_ACTIONS = 5;
+
     private final AppUserRepository users;
+    private final ActionQueries actions;
     private final PasswordEncoder passwordEncoder;
     private final SignedTokenService tokens;
     private final ApplicationEventPublisher events;
     private final Clock clock;
 
+    /**
+     * {@link ActionQueries} rather than {@code action/}'s repository, which is
+     * what this took first. The welcome email's content is actions (ADR-005),
+     * so something in this flow has to read them, and reading them here rather
+     * than in the listener is what keeps the query inside a transaction and off
+     * the mail pool's single thread. What {@code user/} needs is one query
+     * though, not another feature's storage: handed the repository it would
+     * also have been handed every method on {@code JpaRepository}, and
+     * ADR-003's claim that extracting a module stays trivial only holds while
+     * the surface another feature touches is the one deliberately offered.
+     */
     RegistrationService(AppUserRepository users,
+                        ActionQueries actions,
                         PasswordEncoder passwordEncoder,
                         SignedTokenService tokens,
                         ApplicationEventPublisher events,
                         Clock clock) {
         this.users = users;
+        this.actions = actions;
         this.passwordEncoder = passwordEncoder;
         this.tokens = tokens;
         this.events = events;
@@ -330,7 +352,27 @@ public class RegistrationService {
         // calls; the branch above is what tells the caller which happened, not
         // a second guard. Dirty checking flushes this at commit -- no save()
         // call, because the entity is managed inside this transaction.
-        user.markEmailVerified(clock.instant());
+        Instant now = clock.instant();
+        user.markEmailVerified(now);
+
+        // The welcome email (ADR-005), published from the one branch that
+        // actually writes email_verified_at. Every other way of reaching this
+        // page -- an account already confirmed, a prefetched link clicked a
+        // second time, an expired token -- has returned above, which is why
+        // nothing records that the welcome was sent and why no column needs to:
+        // email_verified_at IS NOT NULL is that record.
+        //
+        // last_digest_sent_at is deliberately untouched. It was set to the
+        // registration instant by the column default and it is the digest's
+        // watermark; advancing it here would make the welcome email suppress
+        // the first digest, which is the opposite of what either is for.
+        events.publishEvent(new RegistrationEmailEvent.Welcome(
+                userId,
+                user.getEmail(),
+                user.getDisplayName(),
+                localeOf(user),
+                actions.newestActive(now, WELCOME_ACTIONS)));
+
         return new EmailVerificationOutcome.Verified(userId);
     }
 

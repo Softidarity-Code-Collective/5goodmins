@@ -2,7 +2,7 @@
 
 For the frontend contributor. Read alongside `ARCHITECTURE.md`; where the two
 disagree, `ARCHITECTURE.md` wins and this file gets corrected. Last reconciled
-against ARCHITECTURE.md Rev 23 (2026-11-05): **the repository is now set up for
+against ARCHITECTURE.md Rev 28 (2026-11-05): **the repository is now set up for
 you to start.** One Compose command runs everything, templates and CSS reload
 on save, the static asset paths exist and are served, htmx is vendored and
 wired to the CSRF token, the Content-Security-Policy is decided (section 1 —
@@ -78,11 +78,12 @@ password written down here would be a password on the live site (ADR-021).
 | The style guide page | `src/main/resources/templates/dev/styleguide.html` |
 
 **What actually exists today, and it is less than the page inventory below
-suggests.** Five pages have a backend: register, login, the two verification
-states, and the privacy stub. **There is no home page** — following the logo
-in the header redirects to the login form, and will until the action list is
-built in a few weeks. Everything else in section 4 is a specification, not a
-route.
+suggests.** Six pages have a backend: register, login, the two verification
+states, the privacy stub, and a **placeholder action listing at `/actions`**
+that has no filters, no search and no paging — it exists because the welcome
+email had to link somewhere. **There is still no home page**: following the
+logo in the header redirects to the login form until page 1 proper is built.
+Everything else in section 4 is a specification, not a route.
 
 So the work that is genuinely unblocked right now is:
 
@@ -92,7 +93,7 @@ So the work that is genuinely unblocked right now is:
 2. The base layout and the fragments in section 5. Four of them already exist
    as unstyled placeholders (layout, flash) or as lists on the style guide
    page (badges); the rest are yours from scratch.
-3. The five pages that exist, plus the three error pages.
+3. The six pages that exist, plus the error pages — including `error/429.html`, which the rate limiter already refuses through and which nobody has written.
 4. The two built email templates.
 5. Wireframes for the action list and detail pages, which is where the design
    is actually decided, against the seed content described in section 3.
@@ -315,7 +316,7 @@ valid title.
 
 | # | Page | Notes |
 |---|---|---|
-| 1 | **Action list / home** | The main page. Filters: category, region, type, free-text search. Sorted newest first, paginated. Filter changes swap the results list via htmx without a full reload. Needs: filter sidebar (drawer on mobile), result card, pagination, empty state, and an active-filter summary that can be cleared. |
+| 1 | **Action list / home** | *Placeholder built, everything that makes it page 1 is not.* The main page. Filters: category, region, type, free-text search. Sorted newest first, paginated. Filter changes swap the results list via htmx without a full reload. Needs: filter sidebar (drawer on mobile), result card, pagination, empty state, and an active-filter summary that can be cleared. **What exists today** is an unstyled list of the newest twenty published actions at `/actions`, built because the welcome email needs a destination (ADR-005) — no filters, no search, no htmx swapping, no pagination, and titles that are not yet links because the detail page is page 2. Those are absent rather than stubbed: a filter control that silently does nothing is worse than none. |
 | 2 | **Action detail** | Title, category/region/type badges, full description, image, optional embedded video, author link, end date with remaining time, and a prominent outbound call-to-action button ("Sign the petition" etc., label depends on type). **The link is optional — needs a second variant with no CTA button at all.** Secondary: share, report. |
 | 3 | **Poster profile** | Display name, bio, website link, list of that poster's published actions. |
 | 4 | **About** | Static content page. |
@@ -353,7 +354,7 @@ valid title.
 
 | # | Page | Notes |
 |---|---|---|
-| 19 | **404 / 403 / 500** | *Built, design yours.* Real pages in the site layout, not stack traces, at `templates/error/<status>.html` — the filename is what Spring Boot resolves, so renaming the file is what breaks it. 404 matters: deleted actions land here from old digest links. Caveat worth knowing: until the public paths are named in `SecurityConfig`, an unknown URL redirects an anonymous visitor to the login form instead of reaching the 404 page. That changes with the action list. |
+| 19 | **404 / 403 / 500 / 429** | *404, 403 and 500 built, design yours; 429 is not built.* Real pages in the site layout, not stack traces, at `templates/error/<status>.html` — the filename is what Spring Boot resolves, so renaming the file is what breaks it. 404 matters: deleted actions land here from old digest links, and from the welcome email, whose action links point at page 2 before page 2 exists. **429 is the missing one:** the rate limiter on `/login` and `/register` (ADR-002) refuses through the error dispatch with a `Retry-After` header, precisely so that it inherits this page instead of carrying a user-facing string in Java — but `error/429.html` does not exist yet, so a rate-limited user still gets the whitelabel page. It needs copy as well as a layout: what happened, and that it will work again shortly. Caveat on all four: until more public paths are named in `SecurityConfig`, an unknown URL redirects an anonymous visitor to the login form instead of reaching the 404 page. |
 | 20 | **Report an action** | Small form: reason (select, includes "no longer live") + optional text. Modal or small page, submitted via htmx. |
 
 ### Emails (4)
@@ -369,6 +370,19 @@ link to opt out of the thing the user is in the middle of doing.
    overrides. Each email is an HTML template plus a `.txt` twin of the same
    name; both render from the same model, and both are in the message bundles.
 2. **Welcome** — sent after verification; the five newest active actions.
+   **Built.** Structural placeholder like the others: a greeting, an intro, one
+   block per action (type label, linked title, one abbreviated line) and a
+   single call to action pointing at the listing. Three things must survive a
+   redesign. The empty state is copy, not a gap — the first confirmed account
+   on a fresh deployment sees no actions at all, and a silent hole where a list
+   should be reads as a broken email. There is **no unsubscribe link**, by
+   decision rather than omission (see the paragraph above this list). And there
+   is no mention of the daily digest, because the job does not exist yet; that
+   line is owed, and it lands with the job rather than with the design.
+   **The actions are listed as text, not as links** — the detail page is page 2,
+   and a first email carrying five links to a page that does not exist is worse
+   than five plain headings. The call to action is the email's only link. When
+   page 2 lands the link goes into this template and the listing together.
 3. **Daily digest** — the flagship email: new actions matching the user's
    subscriptions, each as a title, category/region badges, one line, a link.
    Must survive Gmail, Outlook and Apple Mail.

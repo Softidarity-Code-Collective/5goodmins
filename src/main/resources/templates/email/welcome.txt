@@ -1,0 +1,18 @@
+[(#{email.welcome.greeting(${displayName})})]
+
+[(#{email.welcome.intro})]
+[# th:if="${not #lists.isEmpty(actions)}"]
+[(#{email.welcome.newest})]
+[# th:each="action : ${actions}"]
+[(#{${'actionType.' + action.actionType}})]: [(${action.title})]
+[(${#strings.abbreviate(action.excerpt, 140)})]
+[/]
+[/]
+[# th:if="${#lists.isEmpty(actions)}"]
+[(#{email.welcome.empty})]
+[/]
+[(#{email.welcome.cta})]: [(${actionsUrl})]
+
+--
+[(#{email.footer.automated})]
+[(${siteUrl})]

@@ -1,6 +1,8 @@
 package com.fivegoodmins.fivegoodmins.user;
 
 import com.fivegoodmins.fivegoodmins.TestcontainersConfiguration;
+import com.fivegoodmins.fivegoodmins.action.ActionSummary;
+import com.fivegoodmins.fivegoodmins.action.ActionType;
 import com.fivegoodmins.fivegoodmins.shared.email.EmailConfig;
 import com.fivegoodmins.fivegoodmins.shared.email.EmailDeliveryException;
 import com.fivegoodmins.fivegoodmins.shared.email.EmailMessage;
@@ -418,6 +420,100 @@ class RegistrationEmailListenerTest {
         // The subject never carries user input at all -- a newline in a name
         // would be header injection -- which EmailMessage also refuses.
         assertThat(message.subject()).doesNotContain("script");
+    }
+
+    @Test
+    void rendersTheWelcomeEmailWithTheActionsItWasHanded() throws InterruptedException {
+        transactions.executeWithoutResult(status ->
+                events.publishEvent(new RegistrationEmailEvent.Welcome(7L, ADDRESS, NAME, BULGARIAN,
+                        List.of(new ActionSummary(42L, "Спаси гората над София",
+                                        ActionType.PETITION, "Подпиши петицията срещу застрояването."),
+                                new ActionSummary(43L, "Писмо до общината",
+                                        ActionType.LETTER_OR_EMAIL, "Изпрати готово писмо за две минути.")))));
+
+        EmailMessage message = sender.awaitOne();
+
+        assertThat(message.subject()).isEqualTo("Добре дошли в 5 Good Minutes");
+        assertThat(message.html())
+                .contains(NAME)
+                .contains("Спаси гората над София")
+                // The call to action, and the only link in this email. There
+                // used to be one per action pointing at /actions/{id}, which is
+                // page 2 of the brief and does not exist -- five dead links in
+                // the first email a confirmed user receives.
+                .contains("https://test.invalid/actions")
+                .doesNotContain("https://test.invalid/actions/42")
+                .doesNotContain("https://test.invalid/actions/43")
+                // The type label comes from the bundle, keyed on the enum
+                // constant -- so a new ActionType is two properties lines and
+                // no template change (ADR-017).
+                .contains("Петиция")
+                .contains("Писмо или имейл")
+                // No unsubscribe link: that belongs to the digest alone, and on
+                // a welcome email it would offer to opt out of the thing the
+                // reader has just opted into (ADR-005).
+                .doesNotContain("/unsubscribe");
+        assertThat(message.text())
+                .contains("Спаси гората над София")
+                .contains("https://test.invalid/actions")
+                .doesNotContain("https://test.invalid/actions/42")
+                .contains("Петиция")
+                .doesNotContain("<html")
+                .doesNotContain("<td");
+    }
+
+    /**
+     * The first confirmed account on a fresh deployment, before the seed
+     * migration or any real submission. A silent gap where a list should be
+     * reads as a broken email, so the template has a line for it.
+     */
+    @Test
+    void saysSoRatherThanRenderingAGapWhenThereAreNoActiveActions() throws InterruptedException {
+        transactions.executeWithoutResult(status ->
+                events.publishEvent(new RegistrationEmailEvent.Welcome(
+                        7L, ADDRESS, NAME, BULGARIAN, List.of())));
+
+        EmailMessage message = sender.awaitOne();
+
+        assertThat(message.html())
+                .contains("В момента няма активни действия")
+                // The heading above the list is suppressed with the list.
+                .doesNotContain("Най-новите действия в момента")
+                // The call to action stays: an empty site is still worth a look
+                // tomorrow, and this is the only link in the email.
+                .contains("https://test.invalid/actions");
+        assertThat(message.text()).contains("В момента няма активни действия");
+    }
+
+    @Test
+    void rendersTheWelcomeEmailInEnglishForAUserWhoChoseIt() throws InterruptedException {
+        transactions.executeWithoutResult(status ->
+                events.publishEvent(new RegistrationEmailEvent.Welcome(7L, ADDRESS, "Georgi", ENGLISH,
+                        List.of(new ActionSummary(42L, "Save the forest above Sofia",
+                                ActionType.SURVEY, "Two minutes, one form.")))));
+
+        EmailMessage message = sender.awaitOne();
+
+        assertThat(message.subject()).isEqualTo("Welcome to 5 Good Minutes");
+        assertThat(message.html()).contains("Survey").contains("See all actions");
+    }
+
+    /**
+     * A description long enough to be a paragraph, which most of them are: the
+     * welcome email shows one line per action, and 5,000 characters of
+     * {@code text} inside a 600px table is the email rendering as a wall.
+     */
+    @Test
+    void abbreviatesALongDescriptionRatherThanPrintingAllOfIt() throws InterruptedException {
+        String paragraph = "Дълго описание. ".repeat(40);
+        transactions.executeWithoutResult(status ->
+                events.publishEvent(new RegistrationEmailEvent.Welcome(7L, ADDRESS, NAME, BULGARIAN,
+                        List.of(new ActionSummary(42L, "Дълга акция", ActionType.OTHER, paragraph)))));
+
+        EmailMessage message = sender.awaitOne();
+
+        assertThat(message.html()).doesNotContain(paragraph).contains("Дълго описание.");
+        assertThat(message.text()).doesNotContain(paragraph);
     }
 
     private static RegistrationEmailEvent.Verification verification(String token) {

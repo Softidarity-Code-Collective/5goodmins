@@ -1,6 +1,11 @@
 package com.fivegoodmins.fivegoodmins.user;
 
 import com.fivegoodmins.fivegoodmins.TestcontainersConfiguration;
+import com.fivegoodmins.fivegoodmins.action.Action;
+import com.fivegoodmins.fivegoodmins.action.ActionQueries;
+import com.fivegoodmins.fivegoodmins.action.ActionRepository;
+import com.fivegoodmins.fivegoodmins.action.ActionSummary;
+import com.fivegoodmins.fivegoodmins.action.ActionType;
 import com.fivegoodmins.fivegoodmins.shared.token.SignedTokenProperties;
 import com.fivegoodmins.fivegoodmins.shared.token.SignedTokenService;
 import com.fivegoodmins.fivegoodmins.shared.token.TokenPurpose;
@@ -27,6 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.InstanceOfAssertFactories.list;
 
 /**
  * Against a real Postgres, not Mockito, and that is the decision this class
@@ -48,6 +54,10 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 @Import({TestcontainersConfiguration.class,
         RegistrationServiceTest.Collaborators.class,
         SignedTokenService.class,
+        // @DataJpaTest scans repositories, not @Service beans, so the read side
+        // of action/ has to be imported by name alongside the service that
+        // takes it.
+        ActionQueries.class,
         RegistrationService.class})
 @DataJpaTest
 class RegistrationServiceTest {
@@ -60,6 +70,9 @@ class RegistrationServiceTest {
 
     @Autowired
     AppUserRepository users;
+
+    @Autowired
+    ActionRepository actions;
 
     @Autowired
     SignedTokenService tokens;
@@ -552,6 +565,15 @@ class RegistrationServiceTest {
             recorded.clear();
         }
 
+        /** Every welcome email published for this account -- expected to be at most one. */
+        List<RegistrationEmailEvent.Welcome> welcomesFor(long userId) {
+            return recorded.stream()
+                    .filter(RegistrationEmailEvent.Welcome.class::isInstance)
+                    .map(RegistrationEmailEvent.Welcome.class::cast)
+                    .filter(event -> event.userId() == userId)
+                    .toList();
+        }
+
         /** The one verification email published for this account. */
         RegistrationEmailEvent.Verification verificationFor(long userId) {
             List<RegistrationEmailEvent.Verification> matching = recorded.stream()
@@ -632,5 +654,131 @@ class RegistrationServiceTest {
         public Clock withZone(ZoneId zone) {
             throw new UnsupportedOperationException("the application uses one zone: UTC");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // The welcome email (ADR-005). What belongs here is *when* it is published
+    // and *what* it carries; that it is then delivered after commit and off
+    // the request thread is RegistrationEmailListenerTest's subject.
+    // -----------------------------------------------------------------------
+
+    private Action publishedAction(AppUser author, String title) {
+        Action action = new Action(author, title, "Opisanie na akciata",
+                ActionType.PETITION, clock.instant().plus(Duration.ofDays(30)));
+        action.publish(clock.instant());
+        return actions.saveAndFlush(action);
+    }
+
+    @Test
+    void publishesAWelcomeEmailOnTheTransitionThatConfirmsTheAddress() {
+        RegistrationOutcome.Registered registered = register(ADDRESS, PASSWORD, "Георги");
+        String link = tokenFor(registered);
+        emails.clear();
+
+        assertThat(registrations.verifyEmail(link))
+                .isInstanceOf(EmailVerificationOutcome.Verified.class);
+
+        assertThat(emails.welcomesFor(registered.userId()))
+                .singleElement()
+                .satisfies(welcome -> {
+                    assertThat(welcome.email()).isEqualTo(ADDRESS);
+                    assertThat(welcome.displayName()).isEqualTo("Георги");
+                    assertThat(welcome.locale()).isEqualTo(Locale.forLanguageTag("bg"));
+                });
+    }
+
+    /**
+     * The reason no column records that the welcome was sent (ADR-005). A mail
+     * client prefetching the link and a user clicking it twice are both
+     * ordinary, and both reach the same page -- but only the write publishes,
+     * so {@code email_verified_at IS NOT NULL} is the record.
+     */
+    @Test
+    void publishesNoSecondWelcomeWhenTheSameLinkIsUsedAgain() {
+        RegistrationOutcome.Registered registered = register(ADDRESS, PASSWORD, "Георги");
+        String link = tokenFor(registered);
+        emails.clear();
+
+        registrations.verifyEmail(link);
+        registrations.verifyEmail(link);
+        registrations.verifyEmail(link);
+
+        assertThat(emails.welcomesFor(registered.userId())).hasSize(1);
+    }
+
+    @Test
+    void publishesNoWelcomeForALinkThatHasExpired() {
+        RegistrationOutcome.Registered registered = register(ADDRESS, PASSWORD, "Георги");
+        String link = tokenFor(registered);
+        emails.clear();
+
+        clock.advance(TokenPurpose.EMAIL_VERIFICATION.ttl().plusDays(1));
+
+        assertThat(registrations.verifyEmail(link))
+                .isInstanceOf(EmailVerificationOutcome.DeadLink.class);
+        assertThat(emails.welcomesFor(registered.userId())).isEmpty();
+    }
+
+    @Test
+    void carriesTheFiveNewestActiveActionsAndNoMore() {
+        AppUser poster = users.saveAndFlush(
+                new AppUser("poster@seed.example", "{bcrypt}x", "Постващ", clock.instant()));
+        for (int i = 1; i <= 7; i++) {
+            publishedAction(poster, "Akcia " + i);
+        }
+
+        RegistrationOutcome.Registered registered = register(ADDRESS, PASSWORD, "Георги");
+        String link = tokenFor(registered);
+        emails.clear();
+        registrations.verifyEmail(link);
+
+        assertThat(emails.welcomesFor(registered.userId()))
+                .singleElement()
+                .extracting(RegistrationEmailEvent.Welcome::actions, list(ActionSummary.class))
+                .hasSize(5)
+                .allSatisfy(action -> assertThat(action.title()).startsWith("Akcia "));
+    }
+
+    /**
+     * The empty site: a fresh deployment before the seed migration, or before
+     * anybody has submitted anything. An empty list rather than a failure,
+     * because the template has a line for it.
+     */
+    @Test
+    void carriesAnEmptyListWhenNothingIsPublishedYet() {
+        RegistrationOutcome.Registered registered = register(ADDRESS, PASSWORD, "Георги");
+        String link = tokenFor(registered);
+        emails.clear();
+
+        registrations.verifyEmail(link);
+
+        assertThat(emails.welcomesFor(registered.userId()))
+                .singleElement()
+                .extracting(RegistrationEmailEvent.Welcome::actions, list(ActionSummary.class))
+                .isEmpty();
+    }
+
+    /**
+     * ADR-005, in one line: the welcome email does not touch
+     * {@code last_digest_sent_at}. That column is the digest's watermark and
+     * was set to the registration instant by the column default; advancing it
+     * here would make the welcome email suppress the first digest, which is
+     * the opposite of what either is for. Worth asserting rather than trusting,
+     * because the column is one setter away and the symptom would be a digest
+     * that silently never arrives.
+     */
+    @Test
+    void leavesTheDigestWatermarkWhereRegistrationPutIt() {
+        RegistrationOutcome.Registered registered = register(ADDRESS, PASSWORD, "Георги");
+        Instant watermarkAtRegistration =
+                users.findById(registered.userId()).orElseThrow().getLastDigestSentAt();
+
+        clock.advance(Duration.ofHours(3));
+        registrations.verifyEmail(tokenFor(registered));
+        users.flush();
+
+        AppUser confirmed = users.findById(registered.userId()).orElseThrow();
+        assertThat(confirmed.isEmailVerified()).isTrue();
+        assertThat(confirmed.getLastDigestSentAt()).isEqualTo(watermarkAtRegistration);
     }
 }

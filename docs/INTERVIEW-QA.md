@@ -1033,6 +1033,238 @@ The resource that actually runs out first is the connection pool, not CPU:
 every request that touches the database holds a HikariCP connection, and
 Postgres has its own connection ceiling. That is the number I would watch.
 
+### Q: You rate-limit the login form. What numbers did you pick, and why those? **[WARM]**
+
+Twenty attempts per fifteen minutes per client address on `POST /login`. On
+`POST /register`, ten per hour per address and three per twenty-four hours per
+*email* address.
+
+The login number is the one worth defending, because twenty sounds generous. It
+is not sized for one user — one user needs one attempt, or about five if they
+have forgotten which password this is. It is sized for a **shared** address.
+Most mobile traffic in Bulgaria arrives through carrier-grade NAT, so one
+address can be a whole network, and a limit of five would lock out the second
+person who mistyped. Twenty leaves room for four people fumbling. From the
+attacker's side it caps a run at eighty guesses an hour from one address, which
+makes a thousand-password list a half-day job and a credential-stuffing list of
+thousands pointless.
+
+What it does **not** stop is a slow distributed run — a hundred addresses each
+making two attempts a minute. Nothing per-IP does. The honest answer to that is
+Cloudflare Turnstile on the form, which is the next step I would take and have
+not taken.
+
+### Q: Why two buckets on registration? **[DEEP]**
+
+Because they defend different things, and only one of them defends *me*.
+
+Ten registrations an hour from one address exists only for shared addresses
+again — an office or a classroom signing up after a talk. Registration is a
+once-ever act, so any number above one is there for that case.
+
+The per-recipient bucket protects **somebody else's inbox**. Registering over
+an address that exists but is unconfirmed replaces that row and emails its
+owner a fresh link — which is deliberate, because it is the resend mechanism,
+and there is no resend form. Without a cap keyed on the address, the
+registration form is a mail cannon anyone can point at a stranger: one request,
+one email, repeat. Three a day is enough for someone who really is registering,
+failing and registering again, and far too few to be a nuisance.
+
+**And the two caps are enforced in different places, which is the part worth
+the question.** The per-address one refuses the request, in the filter. The
+per-recipient one refuses the *send*, in the email listener. See the next
+answer — it is the best thing in this section.
+
+The second one is also why the rejection log line does not contain the email
+address. The login page refuses to say whether an address has an account here;
+a log file that answers the same question is the same leak, written down.
+
+### Q: You said lockout is a DoS weapon. Did you avoid building one? **[DEEP]**
+
+Not on the first attempt, no. This is the best finding anyone has given me on
+this project and I would rather tell it than be asked.
+
+I rejected account lockout in ADR-002 for a specific reason, written down:
+*it turns the login form into a denial-of-service weapon against anyone whose
+email is known.* Then I built the per-recipient registration cap **in the
+filter**, keyed on the submitted email address. Three POSTs naming
+`victim@example.com` and the real owner of that address could not register for
+twenty-four hours — they got a bare 429. No session and no CSRF token needed,
+because the limiter sits in front of `CsrfFilter`, so even a request that
+Spring Security was about to refuse had already spent the victim's allowance.
+Attacker cost was three of their own ten hourly requests, so three victims an
+hour from one address, and an IPv6 `/64` is a fresh bucket.
+
+That is the same weapon. Same mechanism, different form. I had written the
+argument against it twice and then implemented it anyway, which is worth
+sitting with: the reasoning was in the ADR, and what was missing was asking
+*which key* each bucket used and *who* could name it.
+
+**The fix came out of the bucket's own stated purpose.** It exists to protect a
+stranger's inbox, not my server. So it belongs on the send, not on the request:
+when the allowance is spent, suppress the email and still return the neutral
+"check your inbox" page. The inbox is bounded exactly as before. The owner is
+refused nothing. And `/register`'s single answer for every address survives —
+which the 429 had also broken, because it was a third response the form could
+produce, keyed on request history rather than on the address.
+
+**What it still costs, because this is not a clean win.** A suppressed send is
+an email that never arrives, and the recovery the "check your inbox" page
+offers — register again — will not produce one either until the window passes.
+So an attacker can still deny a targeted address its *email* for a day. What
+they can no longer do is deny it the *account*. That is a strictly smaller
+weapon, and I think it is the smallest one available: no cap on mail to an
+address can both bound the mail and promise that the next message gets through.
+
+**The general rule I took from it**, which is the reusable part: a bucket that
+can refuse a request may only be keyed on something the requester cannot choose
+on somebody else's behalf. That leaves the client address. Anything keyed on a
+value a stranger can type belongs on the side effect, not on the response.
+
+Two things fell out of the fix for free. The filter reads no request parameter
+any more, so it never parses a request body — the multipart caveat the first
+version needed is gone. And the welcome email is exempt from the cap, because
+it cannot be used as a cannon: reaching it requires a valid signed token for
+that account, which only the mailbox's reader has.
+
+### Q: Did you get the rest of that right first time? **[DEEP]**
+
+No, and the follow-up findings are more interesting than the original, because
+all three are the same mistake: I corrected the happy path and not the things
+arranged around it.
+
+**The kill switch still disarmed the mail cap.** It was called `enabled` and
+turned off all three buckets. But the switch's whole purpose is recovering from
+the limiter refusing real users, and only the two address-keyed buckets can do
+that — the mail cap is keyed on the recipient and cannot misfire against a
+client. So the one situation the flag exists for was also the situation in
+which flipping it turned `/register` back into a mail cannon, with the
+per-address bucket going off at the same instant so nothing was left bounding
+it. It is now `refuse-requests`, named for what it does, read only by the
+filter; the mail cap has no switch at all, and loosening it means changing the
+number. There is a test over the properties record's component list, so adding
+a flag that disarms the cap means changing that test first.
+
+**And I spent the token before the send instead of after it.** A provider
+outage plus three retries by a user who can see no email left that address
+capped for twenty-four hours having received nothing — the limiter punishing
+the person it exists to protect. The cap counts mail that reached an inbox, not
+attempts to hand it to a provider.
+
+That second one is worth naming as a pattern, because this codebase already
+contains the same idea somewhere I *did* get right: ADR-005's digest watermark
+"moves only after a successful send". **A side effect that bounds a resource
+commits on success, never on attempt.** Two instances, one rule, and I only
+spotted it in the second place after someone pointed at the first.
+
+The implementation detail is a small decision too: consume up front and refund
+on failure, rather than peek then consume. The mail pool is one thread today,
+so peeking is exact — but ADR-005 says both pool numbers move together if the
+digest ever needs concurrency, and on that day a peek becomes a race that
+over-sends while a consume stays atomic. The refund mirrors the welcome-email
+exemption, or a failed welcome would mint a free token.
+
+**One process point I would volunteer here.** The first version of the refund
+test passed with the refund deleted from the code — it built a fresh limiter
+per listener, so each got a fresh bucket store and the assertion proved nothing.
+I now check a regression test by mutating the thing it covers and confirming
+that test, and only that test, goes red. A regression test nobody has watched
+fail is a comment with an assertion in it.
+
+### Q: How do you key the buckets? **[DEEP]**
+
+`request.getRemoteAddr()`, after Tomcat's `RemoteIpValve` has walked
+`X-Forwarded-For` — with Cloudflare's published ranges in
+`server.tomcat.remoteip.trusted-proxies`, so the walk goes *past* the edge and
+lands on the real client. Without that one property every request on the site
+shares one bucket and the whole country is behind one login limit.
+
+Not `CF-Connecting-IP`, which is the usual recommendation, and reversing it is
+the interesting part. That header is unforgeable only when the request really
+came through Cloudflare. A request sent straight to the `*.up.railway.app`
+origin carries whatever the client wrote in it, so every forged value is a
+fresh bucket and the limit is bypassed by editing one header. `getRemoteAddr()`
+is sound on both paths, because the valve has already done the "is this peer
+Cloudflare" check that the header cannot do for itself.
+
+Two more things happen before the value is a key. IPv6 collapses to its `/64`,
+because a `/128` is one address out of the block an ISP hands a single
+household — key on the whole thing and one attacker has 2^64 buckets. And
+anything unparseable goes to a single shared key rather than its own: the valve
+does not validate what it takes out of the header, so a forged value can be
+arbitrary text, and a key per forgery is the bypass all over again.
+
+### Q: Anything surprising come out of writing that? **[DEEP]**
+
+Three things, and the first is a denial-of-service hole I put in myself.
+
+`InetAddress.getByName` **resolves numeric-looking hostnames**. `1.2.3.4.5` is
+not a parse failure, it is a DNS lookup. So the obvious implementation — parse
+the address, mask it, use it as a key — would have performed one lookup per
+login attempt, against a name the attacker chooses, which is a far better
+weapon than the brute force I was defending against. The dotted-quad form is
+therefore parsed by hand, and `getByName` is called only for values containing
+a colon, which it rejects outright rather than resolving, because a colon is
+not legal in a hostname. `InetAddress.ofLiteral` says all of that in one call
+and arrives in Java 22; I am on 21.
+
+Second: Spring Boot auto-registers a `Filter` bean with the servlet container
+*as well as* adding it to the security chain. Declared as a bean, the limiter
+would have run twice and spent two tokens per request. It is constructed in
+`SecurityConfig` instead, which also puts its position next to every other
+filter's.
+
+Third, and this one is a choice rather than a trap: the limiter's clock is the
+application's injected `Clock`, handed to Bucket4j as a custom `TimeMeter`. A
+rate limiter *is* a stopwatch. Without that, a test of "twenty attempts, a
+refusal, then sixteen minutes later another twenty" either waits sixteen
+minutes or asserts nothing about the window.
+
+### Q: Where do the buckets live, and what breaks? **[WARM]**
+
+In memory, in a Caffeine cache per scope. The core module only — every other
+Bucket4j module exists to share buckets across a cluster, and the scheduler
+already assumes exactly one instance, so a distributed bucket store would
+encode that assumption a second time in a dependency I had rejected.
+
+A small trap worth knowing if you ever add Bucket4j: `bucket4j-core` looks like
+the artifact and is a dead line that stops at 8.10.1. From 8.11 the artifacts
+are split by target JDK, so on Java 21 it is `bucket4j_jdk17-core`. I pinned
+the dead one at what looked like its newest release and a reviewer caught it.
+
+The `enabled` flag that used to sit in front of all three scopes is gone from
+this class for a reason worth repeating: a kill switch has to respect the
+distinction the scopes make. Two of them refuse a request and one refuses a
+send, and only the first kind can ever need killing.
+
+One more failure mode, and I had the sign wrong on it at first. If the valve
+ever stops short of the real client — a stale Cloudflare range, a change at the
+edge — every request shares one bucket, which means twenty login attempts per
+fifteen minutes *for the entire site*. I had written that down as
+"over-restrictive, which is the right direction for a limiter to break in."
+That is wrong: it is a site-wide login outage whose symptom is "login is broken
+for everybody". It is still better than the limit being absent, and it is one
+log line to diagnose, because the refusal prints the resolved key and a
+Cloudflare edge address there *is* the diagnosis. But the real mitigation is at
+the edge — restrict the origin to Cloudflare so the chain is always the one the
+configuration describes — not in the application.
+
+What else breaks, stated rather than discovered: **every deploy resets every
+bucket.** At one deploy a day against a fifteen-minute window that is a
+rounding error. It stops being one the day a second instance exists — and on
+that day the limiter and the digest scheduler need the same fix.
+
+Caffeine rather than a `ConcurrentHashMap` because a map keyed on a client
+address never shrinks: one entry per address ever seen, and IPv6 `/64`s to
+spare. That is an out-of-memory error an attacker can schedule. Two bounds
+close it. `expireAfterAccess` equal to the scope's own window, which is derived
+rather than picked — after a full window with no request a greedy bucket is
+back at full capacity, so the entry holds no information and dropping it is
+free. And a maximum size, whose cost is real: evicting a half-spent bucket
+resets it. What makes that unattractive to exploit is Caffeine's W-TinyLFU
+admission policy, which keeps entries by frequency — under an attack the
+entry the attacker wants evicted is the one the cache most wants to keep.
+
 ---
 
 ## 16. A bug of mine worth telling
@@ -1155,3 +1387,65 @@ bundle — so the condition never matched and the context fell back to a
 `DelegatingMessageSource` that resolves nothing. That one did *not* fail at
 startup: it failed when the first email rendered, on a pool thread. It is now
 declared by hand.
+
+### Q: How did you pick the email provider? **[WARM]**
+
+On the free-tier limits as they actually stood on the day, not on what I
+remembered about them. Brevo: 300 emails a day, no monthly ceiling. Resend: 100
+a day *and* 3,000 a month. Mailgun: 100 a day, and sendable only from a sandbox
+domain to five verified addresses until a card is on file — which means it
+cannot mail an arbitrary registrant at all, so it was not a close second, it
+was not a candidate.
+
+The number that decides it is **emails per day**, because the digest sends one
+email per subscriber per day. A monthly allowance you cannot spend in a day is
+an allowance for a different shape of product. Brevo's daily number is three
+times Resend's, so Brevo.
+
+The honest part of the answer is the cost. Resend has the cleaner API and much
+better delivery logs, and 100 a day would have been plenty for this site's real
+subscriber count for a long time. I traded those logs away in the same week
+whose other job is debugging deliverability. If that turns out to be the wrong
+trade it is one class, which is what the `EmailSender` interface was for — and
+being able to say *one class* rather than *a refactor* is the only reason the
+interface earns its place.
+
+### Q: What does the Brevo sender do that is not about Brevo? **[DEEP]**
+
+Two things.
+
+Connect and read timeouts, which are mandatory rather than defensive habit.
+The mail pool is **one thread** behind a fifty-deep queue. A provider that
+accepts a connection and then stops talking would, with the JDK's default of no
+timeout, hold that thread forever — so a slow afternoon at the provider becomes
+fifty lost emails and then silence, with no error anywhere. The timeout is what
+turns that into fifty logged failures.
+
+And a 4xx and a 5xx are the same failure: both throw one
+`EmailDeliveryException`. The distinction between a permanent rejection and a
+transient outage is only worth modelling once something retries, and I decided
+not to retry at this volume. The thing to name when asked what comes next is a
+transactional outbox — the pending email written in the same transaction as the
+user, a job that sends and retries with backoff, and the row marked done — not
+a `boolean` return value that a caller can ignore.
+
+### Q: The welcome email is "sent in the same transaction that confirms the address". Is it? **[DEEP]**
+
+The *decision* is made there. The send is still after commit, like every other
+email in the application.
+
+`RegistrationService.confirm` publishes the event from the one branch that
+actually writes `email_verified_at`, and that precision is the whole mechanism.
+Every other way of reaching the confirmation page returns before that write: an
+account already confirmed, a mail client prefetching the link, a user clicking
+it twice, an expired token. So "sent exactly once" is true with **no column
+recording that it was sent** — `email_verified_at IS NOT NULL` is the record.
+The test clicks one link three times and asserts one welcome email.
+
+Two consequences worth volunteering. The five actions it carries are loaded
+inside that transaction and travel in the event as DTO projections, because by
+the time the listener runs there is no persistence context to load them from —
+the same reason the event has never carried an entity. And the email contains
+**no promise of a daily digest**, which is the sentence it most obviously wants,
+because the digest job is not built yet and a welcome email that promises one
+is a lie in somebody's inbox until it is.
