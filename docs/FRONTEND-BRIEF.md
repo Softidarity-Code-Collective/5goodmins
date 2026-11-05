@@ -2,10 +2,14 @@
 
 For the frontend contributor. Read alongside `ARCHITECTURE.md`; where the two
 disagree, `ARCHITECTURE.md` wins and this file gets corrected. Last reconciled
-against ARCHITECTURE.md Rev 19 (2026-10-28): **pages 6, 7 and 8 now have
-working backends and placeholder front ends.** The pass before that was Rev 16
-(2026-10-19), which took the email count from three to four and gave page 8 the
-recovery copy that the absence of a resend form depends on.
+against ARCHITECTURE.md Rev 28 (2026-11-05): **the repository is now set up for
+you to start.** One Compose command runs everything, templates and CSS reload
+on save, the static asset paths exist and are served, htmx is vendored and
+wired to the CSRF token, the Content-Security-Policy is decided (section 1 —
+read it before you write a style attribute), every enum has Bulgarian and
+English labels, there is development content to design against, and there is a
+style guide page at `/dev/styleguide` waiting to be filled in. Section 0 is the
+first hour.
 
 **Pages 6, 7 and 8 are yours to design — the templates there are not a
 design.** They are unstyled structural placeholders, written so the controllers
@@ -36,6 +40,89 @@ free to redesign (see section 4).
 
 ---
 
+## 0. Start here
+
+**Run it.** Docker is the only requirement; no Java toolchain, no npm.
+
+```bash
+docker compose --profile app up --build
+```
+
+First build takes a few minutes. Then:
+
+| | |
+|---|---|
+| The site | http://localhost:8080 |
+| **Style guide** | http://localhost:8080/dev/styleguide |
+| Mailpit, which catches every outgoing email | http://localhost:8025 |
+
+**Templates, CSS and JavaScript reload on save.** No restart, no rebuild — the
+development profile reads them straight out of `src/main/resources`. Java
+changes still need a restart.
+
+**Log in** by registering at `/register` and clicking the link in Mailpit —
+twenty seconds, and it is the real flow. The two demo authors who own the seed
+content cannot log in on purpose: that content ships to the live site, so a
+password written down here would be a password on the live site (ADR-021).
+
+**Where things are:**
+
+| | |
+|---|---|
+| Pages | `src/main/resources/templates/` |
+| Shared fragments | `src/main/resources/templates/fragments/` |
+| The base layout | `src/main/resources/templates/layout.html` |
+| CSS, JS, fonts, images | `src/main/resources/static/{css,js,fonts,images}` |
+| Text, Bulgarian | `src/main/resources/messages_bg.properties` |
+| Text, English | `src/main/resources/messages_en.properties` |
+| The style guide page | `src/main/resources/templates/dev/styleguide.html` |
+
+**What actually exists today, and it is less than the page inventory below
+suggests.** Six pages have a backend: register, login, the two verification
+states, the privacy stub, and a **placeholder action listing at `/actions`**
+that has no filters, no search and no paging — it exists because the welcome
+email had to link somewhere. **There is still no home page**: following the
+logo in the header redirects to the login form until page 1 proper is built.
+Everything else in section 4 is a specification, not a route.
+
+So the work that is genuinely unblocked right now is:
+
+1. The design system — colour, type scale, spacing — and the Cyrillic
+   typeface. Put it in `static/css/main.css` and show it off in the style
+   guide.
+2. The base layout and the fragments in section 5. Four of them already exist
+   as unstyled placeholders (layout, flash) or as lists on the style guide
+   page (badges); the rest are yours from scratch.
+3. The six pages that exist, plus the error pages — including `error/429.html`, which the rate limiter already refuses through and which nobody has written.
+4. The two built email templates.
+5. Wireframes for the action list and detail pages, which is where the design
+   is actually decided, against the seed content described in section 3.
+
+**Everything you touch is a placeholder unless its own comment says
+otherwise.** Each template starts with a comment block saying what the backend
+depends on. That list is short and specific; outside it, delete and rebuild
+freely.
+
+### Still owed by the backend, so you do not design around a gap twice
+
+- **Dates and times on screen.** Everything is stored as an instant in UTC.
+  There is no display timezone decision (it will be Europe/Sofia), no
+  formatter, and no strings for "ends in 3 days". Page 2 and page 12 need
+  them; they arrive with the action list rather than before it. Leave a slot,
+  do not invent a format.
+- **The filter and pagination URL contract** for page 1 — which parameters,
+  which htmx target, which fragment comes back. Decided when that controller
+  is written; it will follow the shape the style guide's htmx button already
+  demonstrates.
+- **Images.** ADR-006 settled on storage in Postgres served through a
+  controller, but neither the table nor the upload exists yet. Section 7's
+  default — text-only cards, one featured action with an image — is what to
+  design for now.
+- **Password reset.** v1.1, two pages and an email, not in this build
+  (section 10).
+
+---
+
 ## 1. Technical ground rules
 
 These are not preferences; the backend architecture depends on them.
@@ -51,6 +138,10 @@ Thymeleaf attributes (`th:text`, `th:each`, `th:if`, `th:fragment`), living in
 form submissions that shouldn't reload the whole page use htmx attributes
 (`hx-get`, `hx-post`, `hx-target`, `hx-swap`) against endpoints that return an
 HTML fragment. Everything else is a normal link or form post.
+
+htmx 2.0.11 is **vendored** at `static/js/htmx-2.0.11.min.js` and loaded by the
+layout; the version is in the filename. Not a CDN — see the policy below. To
+upgrade it, drop in the new file and change the one `<script>` tag.
 
 **Vanilla JS only, and as little as possible.** A mobile nav toggle, a
 character counter, a language switcher. No framework, no bundler. If something
@@ -68,14 +159,98 @@ the browser silently falls back to something ugly for Bulgarian text. Check
 Cyrillic coverage before choosing anything. Self-host the font files rather
 than hotlinking, so there's no third-party dependency at page load.
 
-**CSRF.** Spring Security blocks POSTs without a token. The token goes in a
+**Content-Security-Policy: `default-src 'self'` (ADR-020).** This one is
+decided and it constrains how you write every page, so it is the paragraph to
+read twice.
+
+- **No inline `style="..."` attributes and no inline `<style>` blocks.** All
+  CSS in files under `static/css`.
+- **No inline `<script>` and no `onclick` handlers.** All JavaScript in files
+  under `static/js`. htmx attributes are markup, not script, and are fine.
+- **No third-party anything**: no CDN, no Google Fonts stylesheet, no
+  hotlinked image, no embedded widget. Self-host it instead — that is what
+  `static/fonts` is for.
+- `img-src` allows `data:`, so an icon set can be inlined.
+
+A browser enforcing this fails **silently**, with only a console message, so
+the symptom of breaking it is a page that looks unstyled for no visible
+reason. If something you need genuinely requires loosening the policy, say so
+and we change the ADR — do not work around it.
+
+**What it forbids in htmx specifically**, since these are the attributes you
+would otherwise reach for first: `hx-on:click="..."` and its siblings, the
+`js:` prefix on `hx-vals` / `hx-headers`, and event filters such as
+`hx-trigger="click[ctrlKey]"`. All three evaluate a string as code. The layout
+sets `allowEval: false` in htmx's config so htmx declines them with a readable
+console message rather than leaving you with a policy violation reported from
+inside a minified file. Everything else in htmx — `hx-get`, `hx-post`,
+`hx-target`, `hx-swap`, `hx-trigger` without a filter, `hx-indicator`,
+`hx-confirm` — is unaffected. `hx-indicator` has one wrinkle that is already
+handled: htmx would normally inject its `.htmx-indicator` rules as an inline
+`<style>` block, which the policy blocks, so that injection is turned off and
+the three rules live in `main.css` — design them, don't delete them.
+
+**And the workarounds that do work**, because "no inline styles" sounds more
+limiting than it is:
+
+- A value computed per element (a progress width, a brand colour from data)
+  — set it from a file under `/js` with `element.style.setProperty(...)`.
+  The policy blocks the *attribute* in the HTML, not the CSSOM.
+- A handful of variants — utility classes, or a `data-` attribute the
+  stylesheet selects on. `data-` attributes are markup and always allowed.
+- Dark mode — `prefers-color-scheme` in the stylesheet, and a toggle that
+  flips an attribute on `<html>` from a file under `/js`.
+- Inline SVG icons — fine as markup; give them `class` and `fill="currentColor"`
+  rather than a `style` attribute.
+
+**Static assets** live in `src/main/resources/static/` and are served from the
+root: `static/css/main.css` is `/css/main.css`. Four prefixes are public
+without a login — `/css`, `/js`, `/images`, `/fonts` — and a fifth path is not,
+so anything outside them will answer a redirect to the login form rather than
+a file.
+
+**CSRF.** Spring Security blocks POSTs without a token. The token is in a
 `<meta>` tag in the base layout, and `<body>` carries `hx-headers` so every
-htmx POST sends it. Plain forms get a hidden input. Without this everything
-silently returns 403.
+htmx POST sends it. Plain forms get a hidden input automatically, as long as
+the form uses `th:action` rather than `action`. Without this everything
+silently returns 403 — the style guide has a button that posts, which is the
+fastest way to check the wiring survived your rewrite of the layout.
+
+**The layout is a parameterised fragment**, not the layout dialect (which is
+not a dependency here). A page declares:
+
+```html
+<html th:replace="~{layout :: page(#{some.title}, ~{::main})}">
+```
+
+and passes its own `<main>` in. That `<main>` must carry `id="main"` — the
+skip link in the layout points at it, and `th:replace` swaps the layout's
+element for yours, id and all. If you would rather use the layout dialect, or
+want a third parameter for per-page CSS, that is a conversation, not a
+unilateral change: both are dependencies or contracts other templates inherit.
+
+**Flash messages** come from the server as a key, not as text, and are
+rendered by `fragments/flash.html` in the layout above the page content. The
+three levels are `SUCCESS`, `ERROR` and `INFO`. Styling is yours; the
+`role`/`aria-live` pair is not optional, because a message that appears after
+a redirect is announced to a screen reader only if the container says so.
 
 **Content is Bulgarian, code is English.** Category names, regions and statuses
 are English constants in the code (`HUMAN_RIGHTS`, `STARA_ZAGORA`) and are
 translated through the properties files. Never display the constant.
+
+All 54 of them now have both languages, and the key is built from the value:
+
+```html
+<span th:text="#{'category.' + ${category}}">Природа</span>
+```
+
+The prefixes are `category.`, `region.`, `action.type.`, `action.status.` and
+`action.cta.` — the last being the outbound button's label, one per type,
+because "Sign the petition" is wrong on a survey. The lists themselves are on
+the model of every page as `${categories}`, `${regions}`, `${actionTypes}` and
+`${actionStatuses}`, so a filter sidebar or a select never hardcodes them. The
+style guide renders all five sets.
 
 **Mobile first.** Most traffic will arrive from a phone, via a shared link or a
 digest email.
@@ -179,7 +354,7 @@ valid title.
 
 | # | Page | Notes |
 |---|---|---|
-| 19 | **404 / 403 / 500 / 429** | Real pages in the site layout, not stack traces. 404 matters: deleted actions land here from old digest links — and from the welcome email, whose action links point at page 2 before page 2 exists. **429 joins the list:** the rate limiter on `/login` and `/register` (ADR-002) refuses through the error dispatch with a `Retry-After` header, precisely so that it inherits this page instead of carrying a user-facing string in Java. Until then a rate-limited user gets the whitelabel page, which tells them nothing — so this one needs copy as well as a layout: what happened, and that it will work again shortly. |
+| 19 | **404 / 403 / 500 / 429** | *404, 403 and 500 built, design yours; 429 is not built.* Real pages in the site layout, not stack traces, at `templates/error/<status>.html` — the filename is what Spring Boot resolves, so renaming the file is what breaks it. 404 matters: deleted actions land here from old digest links, and from the welcome email, whose action links point at page 2 before page 2 exists. **429 is the missing one:** the rate limiter on `/login` and `/register` (ADR-002) refuses through the error dispatch with a `Retry-After` header, precisely so that it inherits this page instead of carrying a user-facing string in Java — but `error/429.html` does not exist yet, so a rate-limited user still gets the whitelabel page. It needs copy as well as a layout: what happened, and that it will work again shortly. Caveat on all four: until more public paths are named in `SecurityConfig`, an unknown URL redirects an anonymous visitor to the login form instead of reaching the 404 page. |
 | 20 | **Report an action** | Small form: reason (select, includes "no longer live") + optional text. Modal or small page, submitted via htmx. |
 
 ### Emails (4)
@@ -259,9 +434,13 @@ subject line (a newline in a display name is header injection).
 
 ## 5. Reusable fragments
 
-Worth designing once and reusing:
+Worth designing once and reusing. Two of them exist as unstyled placeholders
+you can rebuild — the base layout and the flash message — and the badges are
+already rendered on the style guide from the real message bundles; the rest
+are yours from scratch.
 
 - Base layout: header, nav, footer, language switcher, flash-message area
+  *(placeholder exists: `layout.html`, `fragments/flash.html`)*
 - Action card (list version) and action row (compact, for "my actions" and emails)
 - Category / region / type badge; status badge
 - Filter sidebar and its mobile drawer
@@ -307,8 +486,15 @@ list, with the type icon carrying the visual weight, and one featured action at
 the top of the page with an image.** Full images live on the detail page. If
 you'd rather do it differently after seeing real content, propose it.
 
-**Content for mockups:** use realistic Bulgarian text, not lorem ipsum —
-Cyrillic changes line length and rhythm. There will be ~40 seed actions.
+**Content for mockups:** the seed content exists — 31 actions in realistic
+Bulgarian, loaded in every environment (ADR-021), readable in
+`src/main/resources/db/seed/V100__seed_demo_data.sql` and copy-pasteable into
+a mockup. It is chosen to include the cases that break layouts rather than 31
+comfortable ones: an action with **no external link**, one that is expired, one
+in each of the three non-public statuses, one with three regions, one with a
+video, and one with a title at the full 200 characters and a description long
+enough to break a card that assumed two lines. Design against those, not
+against the short ones.
 
 ---
 
@@ -330,11 +516,14 @@ there isn't much for high-fidelity design to discover. Nobody will maintain a
 Figma file in parallel with the code, so if one exists, treat it as
 disposable.
 
-**Suggested early deliverable: a living style guide page** at a dev-only route
-rendering every component — buttons, badges, form fields, cards, flash
-messages, empty states — in both languages and both themes. It lives in the
-repo, so it can't go stale, it's the fastest way to check work without
-clicking through five pages, and it demos well.
+**The living style guide exists and is waiting for you**, at
+`/dev/styleguide` (development only), from
+`templates/dev/styleguide.html`. It currently renders every badge, the three
+flash levels, an empty state, a form field and an htmx round trip — all
+unstyled, from the real bundles and the real model. It is the fastest way to
+check work without clicking through five pages, it cannot go stale because it
+lives in the repo, and it demos well. Grow it as you add components; its own
+headings are developer-facing English and deliberately not in the bundles.
 
 ---
 
@@ -394,11 +583,14 @@ Not now. Don't design for these, but don't paint us into a corner either.
 
 - Branches and pull requests; Georgi reviews everything, because he has to be
   able to explain every line of the project.
-- The app runs locally with one Docker Compose command (ready in week 1). A
-  frontend contributor should never need a local Java toolchain configured by
-  hand.
+- The app runs locally with one Docker Compose command — `docker compose
+  --profile app up --build`, section 0. No local Java toolchain, and templates
+  and CSS reload on save.
 - Real pages only exist from roughly week 4. Useful work before that: the
   design system (colour tokens, typography scale, spacing), the base layout,
   wireframes for the list and detail pages, and the email templates.
-- README credits contributors by name. Licensing to be agreed before the first
-  substantial contribution.
+- README credits contributors by name.
+- **Licensing: the repository is under the PolyForm Noncommercial License
+  1.0.0** (see `LICENSE`) — worth reading before you spend a weekend on a
+  design system rather than after. If that does not work for you, say so now
+  and we talk about it.

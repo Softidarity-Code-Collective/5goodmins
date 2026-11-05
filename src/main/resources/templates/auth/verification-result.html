@@ -24,7 +24,7 @@
 <html th:replace="~{layout :: page(#{verification.result.title}, ~{::main})}"
       xmlns:th="http://www.thymeleaf.org">
 <body>
-<main th:switch="${state}">
+<main id="main" tabindex="-1" th:switch="${state}">
 
     <div th:case="'CONFIRMED'">
         <h1 th:text="#{verification.result.confirmed.heading}">Address confirmed</h1>

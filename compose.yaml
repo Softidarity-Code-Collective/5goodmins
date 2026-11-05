@@ -33,5 +33,56 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  # The application itself, for anyone who is not running it from an IDE --
+  # the frontend contributor above all (frontend brief, section 12: "should
+  # never need a local Java toolchain configured by hand").
+  #
+  #     docker compose --profile app up --build
+  #
+  # Behind a Compose profile on purpose, and the reason is subtle enough to
+  # write down: spring-boot-docker-compose is on the classpath, so a local
+  # `./mvnw spring-boot:run` reads THIS file and starts the services in it.
+  # Without the profile, that run would start a second copy of the
+  # application in a container, fighting the one Maven just started for port
+  # 8080. Services carrying a profile are skipped unless it is asked for, and
+  # Boot's integration asks for none -- so `./mvnw spring-boot:run` still gets
+  # exactly db + mailpit, and the command above gets all three.
+  app:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    environment:
+      # application-dev.yaml points at localhost, which inside a container is
+      # the container. Relaxed binding turns these into the same properties.
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/fivegoodmins
+      SPRING_DATASOURCE_USERNAME: app
+      SPRING_DATASOURCE_PASSWORD: app
+      SPRING_MAIL_HOST: mailpit
+
+      # The links in the mail land in a browser on the host, not in here.
+      APP_MAIL_BASE_URL: http://localhost:8080
+
+      # Explicit, though .dockerignore already keeps compose.yaml out of the
+      # image: this is the switch that stops a container from trying to drive
+      # Docker Compose, and leaving it to the absence of a file means one
+      # `COPY . .` reintroduces the recursion silently.
+      SPRING_DOCKER_COMPOSE_ENABLED: "false"
+    volumes:
+      # The live-reload mount. Read-only: nothing in the container has any
+      # business writing to the working copy, and Maven builds into
+      # /app/target, which is image-local and deliberately not mounted.
+      - ./src:/app/src:ro
+      # Maven's repository, so a restart does not re-download the tree.
+      - m2:/root/.m2
+
 volumes:
   pgdata:
+  m2:

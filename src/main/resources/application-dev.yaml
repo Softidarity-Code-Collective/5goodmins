@@ -29,8 +29,37 @@ spring:
   # Templates reloaded on save, so an email can be edited and re-sent without a
   # restart. Applies to both halves of each email -- the text resolver in
   # EmailConfig reads this same property.
+  #
+  # `prefix` is the other half of that, and it is what turns a page edit into
+  # a refresh rather than a restart. cache: false re-reads the template from
+  # the CLASSPATH, which at runtime is target/classes -- a copy made by Maven
+  # when the application started, so editing the file under src/ changes
+  # nothing until something recompiles. Pointing the resolver at the source
+  # tree removes the copy from the loop entirely.
+  #
+  # Relative to the working directory, which is the project root under
+  # `./mvnw spring-boot:run` and /app in the Compose `app` service, where
+  # ./src is bind-mounted. Dev-only in both cases: the deployed jar starts
+  # with no profile, reads its templates from inside itself, and would not
+  # find this path at all.
+  #
+  # EmailConfig's text resolver reads this same property, so the .txt half of
+  # each email reloads with the HTML half.
   thymeleaf:
     cache: false
+    prefix: file:./src/main/resources/templates/
+
+  # The same move for CSS, JavaScript, fonts and images: served from the
+  # source tree, so a stylesheet edit is one refresh. classpath:/static/ stays
+  # behind it as the fallback that makes the application still serve assets if
+  # it is ever started from a directory without the sources.
+  #
+  # This REPLACES Boot's default list rather than adding to it, which is why
+  # the classpath entry is written out. /webjars/** is mapped separately and
+  # is unaffected.
+  web:
+    resources:
+      static-locations: file:./src/main/resources/static/,classpath:/static/
 
 # A local run is plain HTTP on localhost, and a Secure cookie is not sent over
 # it by every browser -- Safari refuses, so the session silently never sticks.

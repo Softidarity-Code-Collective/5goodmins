@@ -29,7 +29,8 @@ Work in progress.
 Done:
 
 - Spring Boot skeleton, package-by-feature layout
-- Docker Compose for the backing services: PostgreSQL and Mailpit
+- Docker Compose for everything: PostgreSQL, Mailpit and the application
+- GitHub Actions pipeline; deployed to Railway behind the real domain
 - Flyway `V1__` migration — the user and action schema
 - `AppUser` and `Action` entities with repository tests on a real PostgreSQL
 - Dockerfile, GitHub Actions pipeline, deployed on Railway behind Cloudflare
@@ -40,32 +41,86 @@ Done:
 - Rate limiting on `/login` and `/register` (see below)
 - A placeholder action listing at `/actions` — no filters, search or paging;
   it exists because the welcome email links to it
+- The frontend groundwork: base layout, static assets with a pinned htmx,
+  Content-Security-Policy, error pages, the Bulgarian and English labels for
+  every enum, and a dev-only style guide at `/dev/styleguide`
+- Demo seed data (`V100__`), applied everywhere, so the deployed site is not
+  an empty page
 
 Next, in order:
 
 - Page 1 proper: filters, search, paging and the htmx swapping, over the
   placeholder listing that is there now
+- Templates and the design system (a frontend contributor — see
+  `docs/FRONTEND-BRIEF.md`)
 - Subscriptions and preferences, then the daily digest email and unsubscribe
 - Submitting actions and the admin approval queue
-- Seed data, so the deployed site is not an empty page
 
 ---
 
 ## Running it locally
 
-Needs Docker and Java 21. The application is not containerised yet — Compose
-runs the backing services only, which is the next thing on the list above.
+**Everything in one command — needs Docker, and nothing else:**
 
 ```bash
-docker compose up -d          # PostgreSQL + Mailpit
-./mvnw spring-boot:run        # the application
+docker compose --profile app up --build
 ```
 
+That starts PostgreSQL, Mailpit and the application. The first build fetches
+the dependency tree and takes a few minutes; later starts reuse it.
+
+**With a local Java toolchain**, which is faster to restart and what you want
+if you are changing Java rather than templates:
+
+```bash
+./mvnw spring-boot:run
+```
+
+Compose is started for you — `spring-boot-docker-compose` reads `compose.yaml`
+and brings up PostgreSQL and Mailpit, and stops them again when the
+application exits. It leaves the `app` service alone, because that service
+sits behind a Compose profile; without that, a local run would start a second
+copy of the application in a container and fight it for port 8080.
+
 - Application — http://localhost:8080
+- Style guide (dev profile only) — http://localhost:8080/dev/styleguide
 - Mailpit (catches outgoing mail) — http://localhost:8025
 - PostgreSQL — localhost:5432, database `fivegoodmins`, user/password `app`
 
-Flyway applies the migrations on startup.
+Flyway applies the migrations on startup, including
+`db/seed/V100__seed_demo_data.sql` — 31 actions in realistic Bulgarian under
+two demo authors. That one runs everywhere, deployed site included, because an
+aggregator with no content demos as a blank page (ADR-021). The test suite is
+the only configuration that leaves it out.
+
+**Neither demo author can log in**: their password hashes are BCrypt over
+random bytes that were never recorded, because this file runs in production.
+To get an account, register at http://localhost:8080/register and click the
+link Mailpit catches — the real flow, and the fastest way to check it still
+works. To make that account an admin:
+
+```bash
+docker compose exec db psql -U app -d fivegoodmins -c "update app_user set role = 'ADMIN' where email = 'you@example.com';"
+```
+
+Re-seeding after editing `V100__` means starting the database over —
+`docker compose down -v` — because a versioned migration that has already run
+is frozen by its checksum.
+
+The demo catalogue counts down from the moment Flyway applies it: 27 published
+actions are live on deploy day, 24 of them are still live six months later,
+and all of them have expired by twelve. Refreshing it is a `V101`, due when
+this count drops below ~20:
+
+```bash
+docker compose exec db psql -U app -d fivegoodmins -c "select count(*) from action where status = 'PUBLISHED' and ends_at > now();"
+```
+
+**Templates, CSS and JavaScript reload on save** — no restart, no rebuild. The
+`dev` profile points Thymeleaf and the static resource handler at
+`src/main/resources` instead of the compiled copy under `target/`, and the
+Compose `app` service bind-mounts the same directory. Changing Java code still
+needs a restart.
 
 Tests:
 

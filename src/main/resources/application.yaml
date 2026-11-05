@@ -151,6 +151,21 @@ spring:
   # environment variables. Local runs get them from application-dev.yaml, which
   # spring-boot:run activates via the plugin's <profiles> configuration.
   # Repository tests get them from Testcontainers' @ServiceConnection.
+  # Two locations: the schema, and the demo content that must exist on the
+  # deployed site because the deployed site is the portfolio (ARCHITECTURE.md
+  # §4, ADR-021). Not a profile and not an environment variable -- development
+  # and production run the same list, which is the whole reason the seed is an
+  # ordinary versioned migration rather than something conditional.
+  #
+  # The one place that overrides this is src/test/resources/application.properties,
+  # which drops db/seed: the suite shares one PostgreSQL container, and 31
+  # actions in it would be 31 rows every global assertion has to know about.
+  # Test databases are thrown away, so nothing there can hit the "applied
+  # migration not resolved locally" failure that makes conditional locations a
+  # bad idea in a real environment.
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed
+
   jpa:
     open-in-view: false
     hibernate:

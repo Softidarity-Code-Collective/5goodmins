@@ -30,7 +30,7 @@
 <html th:replace="~{layout :: page(#{register.title}, ~{::main})}"
       xmlns:th="http://www.thymeleaf.org">
 <body>
-<main>
+<main id="main" tabindex="-1">
 
     <h1 th:text="#{register.heading}">Create an account</h1>
     <p th:text="#{register.intro}">It takes a minute.</p>

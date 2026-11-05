@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<!--/*
+  STRUCTURAL PLACEHOLDER, NOT A DESIGN -- the flash message from section 5 of
+  the frontend brief, in the three levels section 6 asks for.
+
+  What must survive: the role/aria-live pair, because a message that appears
+  after a redirect is announced to a screen reader only if the container says
+  so, and the level reaching the markup as a class rather than as colour
+  alone. The styling, the icon and whether it is dismissible are yours.
+
+  Takes the message as a FRAGMENT PARAMETER rather than reading it off the
+  model, and that is not a style choice. th:replace runs at precedence 100
+  and th:with at 500, so a th:with on the same tag as the th:replace never
+  runs -- the host tag and its remaining attributes are discarded before the
+  variable is defined. Written that way, every caller silently rendered
+  nothing. A parameter is evaluated by the caller, where there is no
+  precedence question to get wrong.
+
+  The value is a shared/FlashMessage, which a controller adds to
+  RedirectAttributes before redirecting. It holds a bundle KEY, not text, so
+  the message is resolved here in the request locale.
+*/-->
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+
+<div th:fragment="flash(flash)" th:if="${flash != null}"
+     th:class="'flash flash--' + ${flash.level.key()}"
+     th:attr="role=${flash.level.name() == 'ERROR' ? 'alert' : 'status'},
+              aria-live=${flash.level.name() == 'ERROR' ? 'assertive' : 'polite'}">
+    <!--/*
+      The level, spelled out for anyone who cannot see the colour it is
+      otherwise carried by. flash.success.label / flash.error.label /
+      flash.info.label.
+    */-->
+    <strong th:text="#{'flash.' + ${flash.level.key()} + '.label'}">Готово</strong>
+    <!--/*
+      #messages.msgWithParams rather than #{${...}}, because the arguments
+      arrive as an Object[] and the inline-message syntax wants them written
+      out one by one -- which a fragment that does not know the key cannot do.
+    */-->
+    <span th:text="${#messages.msgWithParams(flash.messageKey, flash.arguments)}">Съобщението.</span>
+</div>
+
+</body>
+</html>

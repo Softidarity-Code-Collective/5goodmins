@@ -1,0 +1,57 @@
+/*
+ * The stylesheet. Empty on purpose.
+ *
+ * The design is the frontend contributor's (frontend brief, section 7): a
+ * turquoise brand colour and an accessible, text-heavy, mobile-first layout,
+ * with everything else open. What is here is the one decision already made
+ * and the two constraints that are not style preferences.
+ *
+ * CONSTRAINTS, not taste:
+ *
+ *   1. The Content-Security-Policy (ADR-020) is default-src 'self' with no
+ *      'unsafe-inline'. Every rule has to be in a file like this one -- an
+ *      inline style="..." attribute and an inline <style> block are both
+ *      blocked by the browser, silently, with only a console message. The
+ *      same applies to JavaScript: files under /js, no onclick handlers.
+ *   2. Fonts are self-hosted from /fonts and must cover Cyrillic. See the
+ *      README there.
+ *
+ * Add more stylesheets by linking them in templates/layout.html, or add a
+ * third parameter to that fragment for per-page assets.
+ */
+
+:root {
+    /*
+     * The one fixed decision in section 7. The exact value is yours -- this
+     * is a starting point, not a brand guideline, and it is here so that
+     * "turquoise" is a token from the first commit rather than a hex code
+     * copied into fifteen rules.
+     */
+    --colour-brand: #14b8a6;
+}
+
+/*
+ * htmx's loading indicator -- htmx's own default rules, copied verbatim from
+ * the vendored file, because htmx would otherwise inject them as an inline
+ * <style> block that the Content-Security-Policy blocks (see the config meta
+ * tag in layout.html).
+ *
+ * Design them freely, but keep BOTH halves of each rule. opacity alone looks
+ * like it is enough and is not: a fully transparent element is still
+ * hit-testable, so it swallows clicks on whatever sits under it, and is still
+ * in the accessibility tree, so a screen reader announces a spinner that is
+ * not there. visibility is what removes it from both. Deleting these rules
+ * altogether leaves hx-indicator doing nothing, and section 6 of the frontend
+ * brief requires it to do something.
+ */
+.htmx-indicator {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 200ms ease-in;
+}

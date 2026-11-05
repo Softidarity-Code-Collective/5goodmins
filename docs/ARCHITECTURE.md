@@ -51,6 +51,8 @@ Everything Rev 1 got right is kept and marked **Accepted**. The rest is marked *
 | 17 | Categories and action types | New (Rev 4) |
 | 18 | Build and runtime: Maven, Spring Boot 4.1.x, Java 21, YAML config | New (Rev 5) |
 | 19 | Time enters through one injected `Clock`; no `Instant.now()` in place | New (Rev 13) |
+| 20 | Content-Security-Policy `default-src 'self'`; static assets and htmx self-hosted | New (Rev 25) |
+| 21 | Demo seed data ships to every environment as `V100__`; only the test config omits it | New (Rev 25), corrected (Rev 26–27) |
 | 5b | Dev mail: Mailpit behind an `EmailSender` interface; PostgreSQL pinned to 18 | Resolved (Rev 9) |
 
 ---
@@ -797,6 +799,56 @@ ArchUnit would express this properly, and would also express the two other rules
 
 ---
 
+### ADR-020 — Content-Security-Policy, and where static assets come from
+
+**Status:** New (Rev 25)
+
+**Decision.** The application sends `Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data:; object-src 'none'`. Every stylesheet, script and font is served from this origin, out of `src/main/resources/static`. htmx is **vendored at a pinned version** (`static/js/htmx-2.0.11.min.js`), not loaded from a CDN.
+
+**Why it is decided now, before the templates exist.** This is the whole reason it is an ADR rather than a line of configuration. A CSP without `'unsafe-inline'` forbids inline `<script>` blocks, `onclick` handlers and `style="..."` attributes. Deciding it after twenty templates have been written means either rewriting them or writing `'unsafe-inline'` into the policy — and a policy with `'unsafe-inline'` provides no protection against the injection it exists to stop, because an injected `<script>` is then exactly as valid as ours. The order is: decide, then write the templates against it. That is also why the frontend brief says so in section 1 rather than in a note at the end.
+
+**What it costs, honestly.** The design system has to live in files. No inline critical CSS, no `style` attribute from a template expression, no third-party widget, no hotlinked image, no Google Fonts stylesheet. The CSRF token for htmx therefore goes into an `hx-headers` attribute in the layout — markup, which the policy allows — rather than being read from the meta tags by a snippet of inline JavaScript, which it does not.
+
+**Why vendored rather than a CDN.** Three reasons, in order of how much they matter: the CSP would have to name the CDN, which is an origin that can change what it serves; a third-party request on every page load is a third party who learns every visitor's IP, which is a GDPR question nobody wants to answer for a `<script>` tag; and an offline laptop should still be able to run the site. The file is 52KB, which is smaller than one image. The version is in the filename so a cached old copy cannot be served as a new one.
+
+**`frame-ancestors 'none'` duplicates `X-Frame-Options: DENY`**, which Spring Security already sends. Both, deliberately: the header is what old browsers read and the directive is what new ones prefer, and the cost of agreeing with yourself twice is one line.
+
+**Deliberately absent: `frame-src`.** Video embeds (ADR-006) will need it for the whitelisted YouTube and Vimeo hosts. It arrives with that feature, not ahead of it — a directive added speculatively is a hole open from the day it is written until the day it is used.
+
+**Rejected: report-only first.** `Content-Security-Policy-Report-Only` is the right move for a site that already has pages, because it measures what would break. This site has four pages and no design, so there is nothing to measure and nowhere to send the reports.
+
+---
+
+### ADR-021 — Demo seed data: the two questions §4 leaves open
+
+**Status:** New (Rev 25), **corrected in Rev 26**, shelf life added in Rev 27
+
+**The correction first, because the mistake is the useful part.** Rev 25 put the seed in a `dev`-profile-only Flyway location — which §4 of this document had already considered and rejected in writing, and which this ADR then contradicted without amending it. Two consequences, both real: the deployed site would have served an empty catalogue, which §4 calls the most common way a portfolio project fails its one job; and a development database with the repeatable migration applied would fail Flyway validation (`detected applied migration not resolved locally`) the first time it was started with production configuration. An ADR that quietly disagrees with the document it lives in is worse than no ADR, because the next reader believes it.
+
+**Decision.** `V100__seed_demo_data.sql`, an ordinary versioned migration exactly as §4 requires, applied in every environment. It lives in `classpath:db/seed` and `application.yaml` names both locations in one list — not a profile, not an environment variable, so development and production run the same thing. Authors are at `seed.example` (RFC 2606, cannot receive mail) and every date is relative to `now()`, both per §4.
+
+§4 settles the shape. Two questions it does not answer, settled here:
+
+**1. The seeded accounts have no usable password.** This file runs on the live site, so a password published in this repository would be a published password for a real account on a real deployment — and with no reset flow until v1.1, no way to take it back except a migration. Each `password_hash` is BCrypt over 32 bytes of `SecureRandom` output that was never recorded: syntactically a hash, verifiable against nothing. They are content, not credentials. `email_verified_at` is still set, not for login but because the nightly purge deletes unconfirmed accounts (ADR-002) and would otherwise take the demo catalogue with them on day seven.
+
+A developer who needs an account registers one at `/register` and clicks the link Mailpit caught — the real flow, twenty seconds, and a test of it. The README carries the one line of SQL that promotes that row to `ADMIN`; a bootstrap admin is its own decision and belongs with the admin pages, not here.
+
+**2. The test configuration is the one place that omits `db/seed`.** `src/test/resources/application.properties` sets `spring.flyway.locations` to the schema alone. The whole suite shares one PostgreSQL container (ADR-014), so the seed's 31 actions and two authors would be committed rows that every global assertion has to account for — `actions.count()`, `users.count()` — and that every future test would have to remember. The alternative, making each of those assertions seed-aware, was considered and rejected: the tax is permanent, it applies to tests nobody has written yet, and the failure mode is a wrong assertion that still passes.
+
+**This is the override §4 warns about, and it is safe for the reason that warning does not reach it.** The failure §4 describes is a long-lived database carrying an applied migration that a later configuration cannot resolve. Every database the test configuration touches is a Testcontainers container deleted when the JVM exits.
+
+**What the content is chosen to cover**, because 31 plausible rows are worth less than 31 rows that make the hard cases visible: an action with **no external link** (the detail page needs a variant with no call-to-action button), one that is **expired** but still `PUBLISHED` (expiry is derived, never a status), one in each of `PENDING`, `REJECTED` and `WITHDRAWN`, one with **three regions**, one with a video URL, and one with a title at the full 200 characters and a description long enough to break a card layout that assumed two lines.
+
+**Editing it after it has run is a checksum failure, not an edit** — the ordinary Flyway discipline, inherited by choosing an ordinary migration. Locally that means `docker compose down -v`; once Railway has it, more content is a `V101`.
+
+**Which means the catalogue has a shelf life, and "the dates are relative" does not settle it.** `now()` in a versioned migration is evaluated once, when Flyway applies the file to that database. Relative dates stop the failure §4 names — a catalogue authored with fixed literals is expired before it is ever deployed — but from the moment V100 runs on Railway, the end dates are fixed timestamps counting down. The first version of this seed had 22 of its 31 actions ending within 60 days of that moment and all of them within five, which would have emptied the portfolio site in the middle of the job hunt it exists for, silently, with nothing in the logs.
+
+So the spread is deliberate and it is stated here rather than left to be read off the file: one action deliberately expired, three in the next 30–60 days so the "ends soon" states are designable, and **the remaining 27 between 180 and 360 days** — the ceiling being the one-year maximum that `V1__`'s comment reserves for the service layer. No code enforces it yet, because no submission path exists; it is policy rather than a `CHECK` on purpose, and seeding past it would make the demo content the first thing to break a rule written before the code that keeps it.
+
+**A `V101` refresh is therefore due within six months of the first Railway deploy**, and the catalogue is empty at twelve. It is not a reminder anybody will remember, so it is a number instead: `SELECT count(*) FROM action WHERE status = 'PUBLISHED' AND ends_at > now();` returns 27 on deploy day and 24 six months later. When it is under 20, write the V101. The same arithmetic applies to `published_at` — "published 3 days ago" ages into "published eight months ago", which is cosmetic and does not change the ordering, so it is not what triggers the refresh.
+
+---
+
 ## 4. MVP scope — what's cut
 
 | Feature | Rev 1 | Now |
@@ -817,6 +869,8 @@ ArchUnit would express this properly, and would also express the two other rules
 **One addition that is not optional: seed data.** You're building an aggregator with no ingestion pipeline and no onboarded NGOs. On demo day the app is empty unless you make it not be. ~40 realistic actions across every category, type and region, written in Bulgarian. Without this, a polished app demos as a blank page — the most common way portfolio projects fail their one job.
 
 **Seed data is an ordinary versioned migration** (`V100__seed_demo_data.sql`, numbered high so schema migrations keep V1–V20), running in every environment including the deployed site — because the deployed site *is* the portfolio and must never be empty. Rejected: a `dev`-profile-only Flyway location, which adds configuration for a distinction that doesn't exist here and later fails validation ("detected applied migration not resolved locally") when a seeded database is started with the production config.
+
+Written in Rev 26; ADR-021 records the two questions this paragraph does not settle — that the seeded accounts have no usable password, and that the test configuration is the one place that omits the file.
 
 Two requirements on its content: seeded authors use emails at `seed.example` (a reserved domain per RFC 2606 that can never receive mail), so one `DELETE` plus cascade removes all demo data when real NGOs arrive; and all dates are relative (`now() + interval '180 days'`), because fixed literals mean the whole catalogue is expired and invisible on the day you demo it.
 
@@ -896,6 +950,14 @@ Full Q&A in `docs/INTERVIEW-QA.md`. The headline list:
 ---
 
 ## 8. Changelog
+
+- **Rev 28 (2026-11-05):** The frontend-handoff branch (Revs 25–27) merged `main` (Revs 21–24), which is where the two lines of work met: the rate limiter, the Brevo transport, the welcome email and the placeholder listing at `/actions` on one side, the static assets, the Content-Security-Policy, the taxonomy labels, the error pages and the demo seed on the other. **Branch revision numbers 21–23 were renumbered to 25–27**, because both branches numbered revisions independently while they were apart and `main`'s numbering is the one other documents cite. Two things the combination changes: the deployed site is no longer an empty page, which was the open item at the bottom of Rev 21's "next" list; and **the 429 page the rate limiter refuses through still does not exist** — ADR-002 routes the refusal through the error dispatch precisely so it inherits a template, Revs 25–27 built that mechanism for 404, 403 and 500, and nobody has written `error/429.html` or its three strings. A rate-limited user gets the whitelabel page until somebody does.
+
+- **Rev 27 (2026-11-05):** Two findings from the review of Rev 26, and both were places where a comment asserted something that was not true. **The seeded dates are relative but evaluated once**: `now()` in a versioned migration runs when Flyway applies the file, so from the deploy the end dates are fixed timestamps counting down — and the spread was 12 to 150 days, which put 22 of the 31 actions past their end date within two months. That is §4's own failure arriving by a different route, and ADR-021 had said the dates were relative "per §4" as though that settled it. The spread is now one expired action, three inside 60 days so the urgent and expired states stay designable, and 27 between 180 and 360 days; ADR-021 carries the arithmetic, the count query and the threshold at which a `V101` refresh is due, since a shelf life nobody can see is one nobody acts on. **The `.htmx-indicator` rules in `main.css` were not htmx's defaults** despite the comment beside them saying so: htmx ships `visibility: hidden` / `visible` alongside the opacity pair, and dropping it leaves a transparent indicator that still swallows clicks and is still announced by a screen reader. Copied verbatim this time. Also in this revision: ADR-021 no longer describes the one-year submission maximum as something the service layer enforces today, since nothing does yet.
+
+- **Rev 26 (2026-10-29):** Review of Rev 25, and **the finding that matters is that Rev 25's ADR-021 contradicted §4 of this document**: it put the demo seed in a `dev`-profile-only Flyway location, which §4 had already rejected in writing, and neither amended §4 nor noticed that the deployed site would therefore be empty — the one thing §4 calls non-negotiable. The seed is now `V100__seed_demo_data.sql` in `db/seed`, applied in every environment through one `spring.flyway.locations` list, with the two sub-decisions §4 does not cover written into ADR-021: the seeded accounts carry BCrypt hashes over discarded random bytes, because this file now runs on the live site and a published password would be a real one; and the test configuration is the single place that omits the seed, which is safe because Testcontainers databases cannot outlive the JVM that would later fail to resolve the migration. Four more fixes from the same review: the flash fragment read its message off a variable set by a `th:with` on the same tag as the `th:replace` — precedence 100 against 500, so the variable never existed and all three examples rendered nothing silently; `Level.key()` used the default locale, which is the Turkish-i trap already fixed once in the registration service; htmx's `includeIndicatorStyles` was left on, so it injected an inline `<style>` block that the CSP blocks, taking `hx-indicator` with it; and the vendored htmx had no recorded provenance, which is half a decision.
+
+- **Rev 25 (2026-10-29):** **The frontend handoff, made true.** The brief promised a contributor who never configures a Java toolchain and a repository they can start in; neither was the case. Compose now has an `app` service behind a profile (`docker compose --profile app up --build`), built from a separate `Dockerfile.dev` — separate because a multi-stage build defaults to its last stage and Railway builds this repository's `Dockerfile` with no target, so a dev stage appended there would have deployed Maven and the source tree to production. The `dev` profile now points Thymeleaf and the static handler at `src/main/resources`, so a template or stylesheet edit is a refresh rather than a restart — measured, not assumed. Two new ADRs: **ADR-020**, the Content-Security-Policy and self-hosted assets, decided before the templates are written because `'unsafe-inline'` is the only way to add it afterwards; and **ADR-021**, development seed data as a repeatable migration in a dev-only Flyway location. Also: the 54 taxonomy labels the enums had no display text for, with `TaxonomyMessagesTest` to keep them complete — `MessageBundlesTest` proves the two bundles agree with each other and cannot notice a key missing from both; `/fonts/**` added to the permitted static paths, where a self-hosted face would otherwise have been answered with a 302 to the login form; error pages for 404, 403 and 500, verified on a real server because MockMvc does not perform the ERROR dispatch and returns an empty body for one; a flash-message fragment; and a dev-only style guide at `/dev/styleguide` whose htmx button is the end-to-end proof that the CSRF token reaches an htmx POST.
 
 - **Rev 24 (2026-10-29):** Review of Rev 23, and **the finding worth recording is not the stale comment, it is how it stayed stale.** Rev 23 renamed `enabled` to `refuse-requests` and reported the class javadoc rewritten; it was not. The edit was a string replacement with a mismatched indent and no assertion, so it silently changed nothing — and the paragraph `RateLimitFilter` points at for its explanation went on claiming the switch turns off the limiter, which is the exact conflation Rev 23 existed to remove. A reader following that pointer found the opposite of the truth. Both javadocs are now correct, every edit in this revision asserted its anchor before writing, and the repository was swept for the whole class of error rather than the one instance reported. **The second finding became a code change rather than a dashboard chore.** A renamed property leaves any environment still setting the old name binding to nothing, silently, because Spring ignores unknown configuration properties — so `APP_RATE_LIMIT_ENABLED` left behind in Railway would have brought the limiter back on at the next deploy with nothing saying so. `app.rate-limit` is now bound with `ignoreUnknownFields = false`, measured to work with record binding before being relied on: startup fails with *The elements [app.rate-limit.enabled] were left unbound*. That is the answer this project already gives for the absent datasource and the absent signing key, and on Railway a container that will not start never takes over from the one running, so being wrong costs a deploy rather than the site. Pinned by a test and mutation-checked like the others. 259 tests, up from 257. **Still open, and still the one thing between this branch and a limiter anybody can say works:** the live `X-Forwarded-For` reading. The README carries the procedure and the three answers it can give; it needs a deploy and a `railway login`.
 
@@ -978,8 +1040,10 @@ half-applied state to clean up.
    B-tree on `action_category(category)` and `action_region(region)`, since the
    composite PKs cannot answer "all actions in this category".
 
-**Not in V1** (later migrations): `subscription`, `report`, `image`,
-`completed_action`, and the `V100__seed_demo_data.sql` seed.
+**Not in V1** (later migrations): `subscription`, `report`, `image` and
+`completed_action`. `V100__seed_demo_data.sql` is also not in V1 and, unlike
+those four, is now written — in `db/seed`, applied everywhere except the test
+configuration (ADR-021).
 
 Every constraint is explicitly named so the application can tell a duplicate URL
 from a duplicate email when it catches `DataIntegrityViolationException`.

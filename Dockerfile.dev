@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# The development image. NOT the one that ships.
+# ---------------------------------------------------------------------------
+#
+# Dockerfile is the production build: it packages a jar, extracts it and runs
+# a JRE as an unprivileged user. Templates, CSS and JavaScript are baked into
+# that jar, so every pixel changed there is a full image rebuild -- a loop no
+# frontend contributor should be asked to work in.
+#
+# This file is the other half of the promise in the frontend brief (section
+# 12): the app runs with one Compose command, and nobody needs a Java
+# toolchain configured by hand. It keeps the JDK and Maven in the image and
+# runs `spring-boot:run` against a bind-mounted `src/`, so saving a template
+# or a stylesheet shows up on the next refresh.
+#
+# A separate file rather than a `dev` stage appended to Dockerfile, because a
+# multi-stage build defaults to its LAST stage and Railway builds the
+# Dockerfile with no target: a dev stage at the bottom would deploy Maven,
+# the JDK and the source tree to production the day it was added.
+# ---------------------------------------------------------------------------
+
+FROM eclipse-temurin:21-jdk
+
+WORKDIR /app
+
+# Same layering reason as the production build: the dependency tree is keyed
+# on the POM alone, so editing a Java file does not re-fetch it. The m2
+# repository is also a named volume in compose.yaml, which is what makes the
+# SECOND `docker compose up` fast rather than only the second layer build.
+COPY .mvn/ .mvn/
+COPY mvnw pom.xml ./
+RUN ./mvnw -B dependency:go-offline
+
+# A baseline copy of the sources, so the image runs even without the bind
+# mount. compose.yaml mounts ./src over this, and that mount is what makes
+# edits on the host visible in here.
+COPY src/ src/
+
+EXPOSE 8080
+
+# spring-boot:run, not a packaged jar: the Maven plugin is what activates the
+# `dev` profile (pom.xml <profiles>dev</profiles>), and application-dev.yaml
+# is what points Thymeleaf and the static handler at src/main/resources
+# instead of target/classes. Those two together are the live reload.
+CMD ["./mvnw", "-B", "spring-boot:run"]

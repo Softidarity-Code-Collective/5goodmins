@@ -9,9 +9,21 @@
   and none of it should be decided by the backend.
 
   What is here is only what the web layer cannot work without: the page
-  skeleton, the CSRF meta tags, and the language switcher's links. There is no
-  stylesheet, no class attribute and no layout. Replace all of this freely --
-  what must survive is listed in each page's own comment.
+  skeleton, the CSRF meta tags, the htmx wiring, the skip link, the flash
+  area and the language switcher's links. There is no layout, no font and
+  almost no stylesheet. Replace all of this freely -- what must survive is
+  listed in each page's own comment, and for this file it is four things:
+
+    1. The two CSRF meta tags and the hx-headers attribute on <body>. Remove
+       any of them and every htmx POST is a silent 403.
+    2. The main element keeps id="main", or the skip link points at nothing.
+       Every PAGE template's own <main> carries that id too -- th:replace
+       below swaps this element for the page's, tag and all, so the id has to
+       be on theirs. StyleGuideWebTest checks one page; the convention is
+       yours to keep on the rest.
+    3. htmx is loaded from /js, not from a CDN: the Content-Security-Policy
+       (ADR-020) allows scripts from this origin only.
+    4. Every string comes from the bundles (ADR-008).
 
   Used as a parameterised fragment rather than through the layout dialect,
   which is not a dependency: a page declares
@@ -39,8 +51,72 @@
     <meta name="_csrf_header" th:content="${_csrf?.headerName}">
 
     <title th:text="${pageTitle} + ' - ' + #{app.name}">5 Good Minutes</title>
+
+    <!--/*
+      One stylesheet, because there is one page's worth of design so far. If
+      the design system wants a file per area, add them here -- or add a
+      third fragment parameter for per-page assets, which is the cheaper
+      change the day one page needs 40KB nothing else does.
+    */-->
+    <link rel="stylesheet" th:href="@{/css/main.css}">
+
+    <!--/*
+      htmx's own configuration, as markup rather than as a script, because
+      the CSP (ADR-020) allows no inline JavaScript. It has to come before
+      the script tag: htmx reads this meta tag when it loads.
+
+      includeIndicatorStyles=false turns off the <style> block htmx injects
+      into the document head on load, which carries the default
+      .htmx-indicator rules. An injected style element is inline CSS, which
+      the policy blocks -- so with this left on, every page reports a CSP
+      violation and hx-indicator does nothing at all (frontend brief,
+      section 6, requires it to do something). The rules live in main.css
+      instead, where they can be designed.
+
+      allowEval=false turns off the three htmx features that evaluate strings
+      as code -- hx-on:* handlers, the js: prefix on hx-vals and hx-headers,
+      and event filters like hx-trigger="click[ctrlKey]". All three use the
+      Function constructor, which the CSP blocks anyway; the difference is
+      that htmx now declines them with a readable console message instead of
+      the browser reporting a policy violation from somewhere inside a
+      minified file. The replacement for all three is a handler in a file
+      under /js.
+    */-->
+    <meta name="htmx-config" content='{"allowEval": false, "includeIndicatorStyles": false}'>
+
+    <!--/*
+      htmx, vendored at a pinned version under src/main/resources/static/js
+      (ADR-020). Not a CDN: the CSP allows this origin only, a third-party
+      script tag is a third party who can change the page, and an offline
+      laptop should still run the site.
+
+      defer rather than the end of <body>: the parser does not stop for it,
+      and htmx processes the document on DOMContentLoaded either way.
+    */-->
+    <script th:src="@{/js/htmx-2.0.11.min.js}" defer></script>
 </head>
-<body>
+
+<!--/*
+  hx-headers puts the CSRF token on every htmx request from this page, which
+  is the one line that keeps htmx POSTs from returning 403. Built here rather
+  than read from the meta tags by a script, because reading them would need
+  inline JavaScript and the CSP forbids it.
+
+  th:attr with a null value writes no attribute at all, which is what the
+  conditional expression is for: on a path where CSRF is disabled there is no
+  token to write and an empty header would be a lie.
+*/-->
+<body th:attr="hx-headers=${_csrf != null
+                 ? '{&quot;' + _csrf.headerName + '&quot;: &quot;' + _csrf.token + '&quot;}'
+                 : null}">
+
+<!--/*
+  The skip link: the first focusable thing on the page, for a keyboard or
+  screen-reader user who would otherwise tab through the whole header on
+  every page. It is not optional under the accessibility line in section 7 of
+  the brief, and it is the reason <main> carries an id and tabindex.
+*/-->
+<a href="#main" th:text="#{layout.skipToContent}">Към основното съдържание</a>
 
 <header>
     <!--/*
@@ -74,6 +150,13 @@
         </ul>
     </nav>
 </header>
+
+<!--/*
+  The flash area, above the page content and outside it, so that a controller
+  can say something after a redirect without every page template carrying the
+  markup for it. Renders nothing when there is no message.
+*/-->
+<div th:replace="~{fragments/flash :: flash(${flash})}"></div>
 
 <main th:replace="${content}">
     <p>The page's own content replaces this.</p>

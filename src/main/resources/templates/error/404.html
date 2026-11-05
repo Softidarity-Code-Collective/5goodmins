@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<!--/*
+  Page 19 of the frontend brief: a real page in the site layout, not a stack
+  trace and not Boot's whitelabel page. STRUCTURAL PLACEHOLDER -- the design
+  is yours.
+
+  Spring Boot finds this by filename: error/<status>.html, resolved by
+  BasicErrorController on the ERROR dispatch. Renaming the file is what
+  breaks it, so the name is the contract and there is no mapping to read.
+
+  Two things must survive. Nothing here may be user-supplied or come off the
+  request -- an error page that echoes the path it was reached by is a
+  reflected-XSS hole on the one page nobody tests. And no model attribute
+  from the failed request is available, so the page has to make sense knowing
+  nothing: no "back to the action you were viewing".
+*/-->
+<html th:replace="~{layout :: page(#{error.404.title}, ~{::main})}"
+      xmlns:th="http://www.thymeleaf.org">
+<body>
+<main id="main" tabindex="-1">
+
+    <h1 th:text="#{error.404.heading}">Error</h1>
+    <p th:text="#{error.404.body}">Something went wrong.</p>
+
+    <a th:href="@{/}" th:text="#{error.backHome}">Back to the start</a>
+
+</main>
+</body>
+</html>

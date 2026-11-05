@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<!--/*
+  The living style guide (frontend brief, section 8). Dev profile only --
+  StyleGuideController is not registered in production.
+
+  THIS PAGE IS THE DELIVERABLE, NOT THE DESIGN. What is here is a list of the
+  components section 5 says are worth building once, each rendered from the
+  real message bundles and the real model attributes, with no styling at all.
+  Replace the markup of each block as you design it; keep the blocks, because
+  this page is the fastest way to see every component in both languages (the
+  switcher in the header works here) and in both themes.
+
+  Its own headings are English and hardcoded on purpose: this is a developer
+  tool, so ADR-008 does not apply to the page's own chrome. Everything it
+  demonstrates resolves through the bundles -- a taxonomy label missing from
+  one language shows up here as a blank badge rather than as a 500 on a page
+  a user is reading.
+*/-->
+<html th:replace="~{layout :: page('Style guide', ~{::main})}"
+      xmlns:th="http://www.thymeleaf.org">
+<body>
+<main id="main" tabindex="-1">
+
+    <h1>Style guide</h1>
+    <p>
+        Dev profile only. Every string below comes from
+        <code>messages_bg.properties</code> / <code>messages_en.properties</code>;
+        switch language in the header to see both.
+    </p>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2>Action types</h2>
+    <p>
+        Five. The badge text is <code>#{'action.type.' + ${type}}</code>; the enum
+        constant itself is never displayed.
+    </p>
+    <ul>
+        <li th:each="type : ${actionTypes}">
+            <span th:text="#{'action.type.' + ${type}}">Петиция</span>
+            <code th:text="${type}">PETITION</code>
+        </li>
+    </ul>
+
+    <h2>Outbound call to action</h2>
+    <p>
+        One label per type (frontend brief, page 2), because "Sign the petition"
+        on a survey is wrong. The external link is optional on an action, so the
+        detail page also needs a variant with no button at all.
+    </p>
+    <ul>
+        <li th:each="type : ${actionTypes}">
+            <a href="https://example.org" target="_blank" rel="noopener noreferrer"
+               th:text="#{'action.cta.' + ${type}}">Подпишете петицията</a>
+            <span th:text="#{action.externalLink.newTab}">Отваря се в нов раздел</span>
+        </li>
+    </ul>
+
+    <h2>Categories</h2>
+    <ul>
+        <li th:each="category : ${categories}">
+            <span th:text="#{'category.' + ${category}}">Природа</span>
+            <code th:text="${category}">NATURE</code>
+        </li>
+    </ul>
+
+    <h2>Regions</h2>
+    <p>28 oblasti plus NATIONAL and INTERNATIONAL. This list is the filter sidebar's worst case.</p>
+    <ul>
+        <li th:each="region : ${regions}">
+            <span th:text="#{'region.' + ${region}}">Благоевград</span>
+            <code th:text="${region}">BLAGOEVGRAD</code>
+        </li>
+    </ul>
+
+    <h2>Statuses</h2>
+    <p>Only ever visible on "my actions" and the admin queues.</p>
+    <ul>
+        <li th:each="status : ${actionStatuses}">
+            <span th:text="#{'action.status.' + ${status}}">Публикувано</span>
+            <code th:text="${status}">PUBLISHED</code>
+        </li>
+    </ul>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2>Flash messages</h2>
+    <p>
+        The fragment in <code>fragments/flash.html</code>, called three times so
+        all three levels show at once. In a real request there is one, put on the
+        model by a controller as a <code>FlashMessage</code> before a redirect, and
+        rendered once by the layout.
+    </p>
+    <div th:replace="~{fragments/flash :: flash(${flashSuccess})}"></div>
+    <div th:replace="~{fragments/flash :: flash(${flashError})}"></div>
+    <div th:replace="~{fragments/flash :: flash(${flashInfo})}"></div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2>Empty state</h2>
+    <div>
+        <p th:text="#{empty.noResults.heading}">Няма намерени действия</p>
+        <p th:text="#{empty.noResults.body}">Опитайте с по-малко филтри.</p>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2>Form field</h2>
+    <p>
+        Label, hint and error, which section 5 of the brief still lists as an open
+        fragment. The error here is shown unconditionally so it can be designed; on
+        a real form it comes from <code>th:errors</code> and the field is bound with
+        <code>th:field</code> -- see <code>auth/register.html</code>.
+    </p>
+    <div>
+        <label for="example-email" th:text="#{register.email.label}">Имейл адрес</label>
+        <input type="email" id="example-email" name="example-email">
+        <small th:text="#{register.email.hint}">Изпращаме връзка за потвърждение.</small>
+        <small th:text="#{validation.email.format}">Това не прилича на имейл адрес.</small>
+    </div>
+
+    <!-- ------------------------------------------------------------------ -->
+    <h2>htmx + CSRF</h2>
+    <p>
+        The wiring that silently 403s when it is wrong. This button posts with no
+        form and no page reload; it works because <code>&lt;body&gt;</code> in the
+        layout carries <code>hx-headers</code> with the CSRF token. If you rebuild
+        the layout and drop that attribute, this is where you find out.
+    </p>
+    <button type="button"
+            th:attr="hx-post=@{/dev/styleguide/htmx-check}"
+            hx-target="#htmx-result"
+            hx-swap="outerHTML">
+        Post something
+    </button>
+    <div id="htmx-result">Not posted yet.</div>
+
+</main>
+
+<!--/*
+  The fragment StyleGuideController returns for the POST above. An htmx
+  endpoint answers with HTML, not JSON (ADR-001), and swapping it in replaces
+  the div with this one -- same id, so the button can be pressed again.
+*/-->
+<div th:fragment="htmx-result" id="htmx-result">
+    Posted. The server saw the CSRF header at
+    <span th:text="${checkedAt}">2026-01-01T00:00:00Z</span>.
+</div>
+
+</body>
+</html>

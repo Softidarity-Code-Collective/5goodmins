@@ -53,9 +53,15 @@ class SecurityConfig {
                         // Static assets. Listed explicitly rather than through
                         // PathRequest.toStaticResources(): that helper matches
                         // Boot's conventional locations, and an "everything
-                        // under these four prefixes is public" rule I wrote
-                        // myself is one I can read off the file.
-                        .requestMatchers("/css/**", "/js/**", "/images/**", "/favicon.ico")
+                        // under these five prefixes is public" rule I wrote
+                        // myself is one I can read off the file. /fonts is
+                        // there because the brief requires self-hosted faces
+                        // with Cyrillic coverage, and a font falling through
+                        // to anyRequest().authenticated() is a 302 to the
+                        // login form that a browser reports as a font that
+                        // will not load.
+                        .requestMatchers("/css/**", "/js/**", "/images/**", "/fonts/**",
+                                "/favicon.ico")
                         .permitAll()
 
                         // Spring Boot's error page. Only reachable on a direct
@@ -64,6 +70,22 @@ class SecurityConfig {
                         // rule. Without it, a direct GET /error would redirect
                         // an anonymous visitor to the login form.
                         .requestMatchers("/error").permitAll()
+
+                        // The living style guide (frontend brief, section 8).
+                        // StyleGuideController is @Profile("dev") and the
+                        // deployed jar runs with no profile, so in production
+                        // nothing is mapped here and the path is a 404.
+                        //
+                        // Permitted unconditionally rather than behind a
+                        // profile-specific filter chain, deliberately: a
+                        // security rule that exists in one profile and not in
+                        // another is a rule nobody can read off this file, and
+                        // the tests would then be verifying a configuration
+                        // production does not run. Permitting a path that
+                        // nothing serves costs nothing; the day something
+                        // serves /dev/** in production, the mistake is that
+                        // controller, not this line.
+                        .requestMatchers("/dev/**").permitAll()
 
                         // The anonymous half of ADR-002's registration flow,
                         // named one by one. /verify-email is the path in every
@@ -103,7 +125,9 @@ class SecurityConfig {
                 // applies by default, so without this line there is no way to
                 // authenticate at all. logout, csrf, headers,
                 // sessionManagement and exceptionHandling *are* applied by
-                // default, which is why they are absent here:
+                // default, which is why only the headers block below appears
+                // at all -- and that one adds a header to the defaults rather
+                // than replacing them:
                 //
                 //   * CSRF protection is on. It will 403 htmx POSTs until the
                 //     token is wired into hx-headers (ADR-002); that is a
@@ -134,7 +158,53 @@ class SecurityConfig {
                 // one deliberately vague message for.
                 .formLogin(form -> form
                         .loginPage(AuthPaths.LOGIN)
-                        .permitAll());
+                        .permitAll())
+
+                // Content-Security-Policy (ADR-020), which is NOT one of the
+                // default headers and is the one piece of hardening that has
+                // to be decided before the templates are written rather than
+                // after: a policy without 'unsafe-inline' is a rewrite of
+                // every page that grew an inline style attribute or an
+                // onclick handler in the meantime.
+                //
+                // Directive by directive:
+                //
+                //   default-src 'self'   -- scripts, styles, fonts, media and
+                //       anything added later come from this origin only. htmx
+                //       is vendored under /js and fonts are self-hosted
+                //       (frontend brief, section 1), so there is no CDN to
+                //       allow. It also means no inline <script> and no inline
+                //       style="" attribute: the hx-headers attribute in the
+                //       layout is markup rather than script, which is why the
+                //       CSRF token is written there instead of read from the
+                //       meta tags by a snippet.
+                //   base-uri 'self'      -- an injected <base> tag cannot
+                //       repoint every relative URL on the page.
+                //   form-action 'self'   -- a form cannot be made to POST the
+                //       session's CSRF token to another origin.
+                //   frame-ancestors 'none' -- the modern half of the
+                //       X-Frame-Options: DENY that Spring Security already
+                //       sends; both, because old browsers read only the
+                //       header and new ones prefer this.
+                //   img-src 'self' data: -- action images are served by this
+                //       application (ADR-006), and data: covers the inline
+                //       SVG icons an icon set is usually shipped as.
+                //   object-src 'none'    -- no Flash, no applets, nothing
+                //       that predates the policy.
+                //
+                // Not here yet, and it will be: video embeds (ADR-006) need
+                // frame-src for the whitelisted YouTube/Vimeo hosts on the
+                // day the detail page renders one. That is one directive
+                // added with the feature, not a reason to leave the policy
+                // open now.
+                .headers(headers -> headers
+                        .contentSecurityPolicy(csp -> csp.policyDirectives(
+                                "default-src 'self'; "
+                                        + "base-uri 'self'; "
+                                        + "form-action 'self'; "
+                                        + "frame-ancestors 'none'; "
+                                        + "img-src 'self' data:; "
+                                        + "object-src 'none'")));
 
         return http.build();
     }

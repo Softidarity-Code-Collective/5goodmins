@@ -204,4 +204,51 @@ class SecurityHeadersTest {
         assertThat(header(response, "X-Content-Type-Options")).hasValue("nosniff");
         assertThat(header(response, "X-Frame-Options")).hasValue("DENY");
     }
+
+    @Test
+    void sendsTheContentSecurityPolicyThatTheTemplatesAreWrittenAgainst() throws Exception {
+        // NOT a default -- Spring Security sends no CSP unless asked
+        // (ADR-020). Asserted as the directive set rather than as the header
+        // string, for the same reason as HSTS above: the separators are
+        // formatting and the directives are the decision.
+        //
+        // Each of these costs something, which is why the list is worth
+        // failing a build over:
+        //
+        //   * default-src 'self' forbids inline <script> and inline style=""
+        //     attributes. The entire design system has to live in files under
+        //     /css and /js. Loosening it later to 'unsafe-inline' is not a
+        //     tweak -- it is the end of the protection, because an injected
+        //     <script> is then as valid as ours.
+        //   * form-action 'self' means no form on this site may post
+        //     anywhere else, including a third-party newsletter widget.
+        //   * img-src allows data: so icon sets can be inlined; it does not
+        //     allow remote images, so a hotlinked illustration will not load.
+        //
+        // The directive that is deliberately absent is frame-src: the video
+        // embeds of ADR-006 will need it for the whitelisted hosts, and it
+        // arrives with that feature rather than ahead of it.
+        assertThat(header(get("/"), "Content-Security-Policy")).hasValueSatisfying(csp ->
+                assertThat(Arrays.stream(csp.split(";")).map(String::trim).collect(toSet()))
+                        .containsExactlyInAnyOrder(
+                                "default-src 'self'",
+                                "base-uri 'self'",
+                                "form-action 'self'",
+                                "frame-ancestors 'none'",
+                                "img-src 'self' data:",
+                                "object-src 'none'"));
+    }
+
+    @Test
+    void servesAStaticAssetToAnAnonymousVisitor() throws Exception {
+        // The vendored htmx file, which every page loads before anyone has
+        // logged in. Without /js in the permitted list this is a 302 to the
+        // login form, which a browser reports as a script that failed to
+        // parse rather than as an authorization problem -- the same trap
+        // /fonts was added to the list to avoid.
+        HttpResponse<String> response = get("/js/htmx-2.0.11.min.js");
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.body()).contains("htmx");
+    }
 }
