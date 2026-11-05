@@ -99,7 +99,8 @@ is frozen by its checksum.
 
 The demo catalogue counts down from the moment Flyway applies it: 27 published
 actions are live on deploy day, 24 of them are still live six months later,
-and all of them have expired by twelve. Refreshing it is a `V101`, due when this drops below ~20:
+and all of them have expired by twelve. Refreshing it is a `V101`, due when
+this count drops below ~20:
 
 ```bash
 docker compose exec db psql -U app -d fivegoodmins -c "select count(*) from action where status = 'PUBLISHED' and ends_at > now();"
