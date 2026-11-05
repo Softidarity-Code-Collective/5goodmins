@@ -1,0 +1,93 @@
+<!--/*
+  Email 2 of 4: sent the moment an address is confirmed (ADR-005).
+
+  Different in kind from the other three. Verification and "you already have an
+  account" are errands -- one link, do the thing, close the tab. This one has a
+  job that is not an errand: a person has just handed over their address and
+  wants to know what for. So it carries the five newest active actions,
+  unpersonalized, because subscriptions are usually not set at this moment
+  (ADR-005) and asking them to configure something is the wrong first move.
+
+  No unsubscribe footer, and that is a decision rather than an omission (ADR-005,
+  frontend brief section 4): the unsubscribe link belongs to the digest. On a
+  welcome email it would be an invitation to opt out of the thing they have just
+  opted into, one line below the reason they opted in.
+
+  Also no promise of a daily digest, which is the sentence this email most
+  obviously wants. The digest job is not built yet, and a welcome email that
+  says "you will now receive a daily digest" is a lie in somebody's inbox until
+  it is. The line goes in with the job.
+
+  Model: displayName, actions (ActionSummary: id, title, actionType, excerpt),
+  actionsUrl. siteUrl comes from the composer.
+
+  The actions carry no links, deliberately -- see the note at the title below.
+*/-->
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{email/layout :: page(#{email.welcome.subject}, #{email.welcome.preheader}, ~{:: #content})}">
+<body>
+<div id="content"
+     style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; font-size:16px; line-height:24px;">
+
+    <p class="text" style="margin:16px 0 12px 0; color:#172424;"
+       th:text="#{email.welcome.greeting(${displayName})}">Hello,</p>
+
+    <p class="text" style="margin:0 0 24px 0; color:#172424;"
+       th:text="#{email.welcome.intro}">Your address is confirmed.</p>
+
+    <p class="text" style="margin:0 0 12px 0; font-weight:700; color:#172424;"
+       th:if="${not #lists.isEmpty(actions)}"
+       th:text="#{email.welcome.newest}">The newest actions:</p>
+
+    <!--/* The empty state is not hypothetical: it is what the first confirmed
+           account on a brand-new deployment sees, before the seed migration or
+           any real submission. A silent gap where a list should be reads as a
+           broken email. */-->
+    <p class="muted" style="margin:0 0 24px 0; color:#5c6b6b;"
+       th:if="${#lists.isEmpty(actions)}"
+       th:text="#{email.welcome.empty}">Nothing active right now.</p>
+
+    <!--/* A table per action rather than a <ul>: Outlook's Word engine applies
+           its own indentation and bullet to a list and ignores most attempts to
+           restyle it, so five list items are five different layouts across
+           clients. A one-cell table is boring and renders the same everywhere.
+
+           The type label comes from the bundle under a key built from the enum
+           constant -- #{${'actionType.' + ...}} -- so adding an action type is
+           an enum constant plus two properties lines (ADR-017) and no template
+           change at all. */-->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           th:each="action : ${actions}" style="margin:0 0 16px 0;">
+        <tr>
+            <td style="padding:0;">
+                <p class="muted" style="margin:0 0 2px 0; font-size:12px; line-height:18px; text-transform:uppercase; letter-spacing:0.04em; color:#5c6b6b;"
+                   th:text="#{${'actionType.' + action.actionType}}">Petition</p>
+                <!--/* Not a link. The detail page is page 2 of the brief and
+                       does not exist, and five dead links in the first email a
+                       confirmed user receives is worse than five plain
+                       headings. The link goes here and in the listing template
+                       together, when page 2 lands. */-->
+                <p class="text" style="margin:0 0 4px 0; font-size:17px; line-height:24px; font-weight:700; color:#172424;"
+                   th:text="${action.title}">An action</p>
+                <!--/* Already cut to 200 characters by the query; 140 here. See
+                       ActionSummary.EXCERPT_CHARS before raising this. */-->
+                <p class="muted" style="margin:0; font-size:14px; line-height:21px; color:#5c6b6b;"
+                   th:text="${#strings.abbreviate(action.excerpt, 140)}">One line about it.</p>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px 0;">
+        <tr>
+            <td align="center" bgcolor="#0f766e" style="background-color:#0f766e; border-radius:6px;">
+                <a th:href="${actionsUrl}" th:text="#{email.welcome.cta}"
+                   style="display:inline-block; padding:14px 28px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; font-size:16px; font-weight:700; color:#ffffff; text-decoration:none;">
+                    See all actions
+                </a>
+            </td>
+        </tr>
+    </table>
+</div>
+</body>
+</html>

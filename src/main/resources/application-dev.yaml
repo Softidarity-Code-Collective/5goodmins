@@ -15,6 +15,13 @@ spring:
   # so this single line is the difference between a dev run that delivers mail
   # and one that logs a failure. Nothing to authenticate against: Mailpit
   # accepts everything and delivers nowhere.
+  #
+  # Note which way the tie breaks: EmailConfig prefers Brevo when an API key is
+  # set, because this host is set for everyone by this file and is therefore not
+  # evidence of an intention, while a key is only ever there because somebody
+  # put it there. So exporting APP_MAIL_BREVO_API_KEY for a local run sends real
+  # mail from the real domain, past Mailpit -- which is occasionally what you
+  # want and is never what you want by accident.
   mail:
     host: localhost
     port: 1025

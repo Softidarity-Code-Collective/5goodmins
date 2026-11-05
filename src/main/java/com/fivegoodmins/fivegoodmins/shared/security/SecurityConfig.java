@@ -1,6 +1,10 @@
 package com.fivegoodmins.fivegoodmins.shared.security;
 
+import com.fivegoodmins.fivegoodmins.action.ActionPaths;
 import com.fivegoodmins.fivegoodmins.shared.AuthPaths;
+import com.fivegoodmins.fivegoodmins.shared.ratelimit.RateLimitFilter;
+import com.fivegoodmins.fivegoodmins.shared.ratelimit.RateLimitProperties;
+import com.fivegoodmins.fivegoodmins.shared.ratelimit.RateLimiter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.access.hierarchicalroles.RoleHierarchy;
@@ -10,6 +14,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CsrfFilter;
 
 /**
  * The web security configuration (ADR-002): form login over a server-side
@@ -32,8 +37,18 @@ import org.springframework.security.web.SecurityFilterChain;
 class SecurityConfig {
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                            RateLimiter rateLimiter,
+                                            RateLimitProperties rateLimits) throws Exception {
         http
+                // ADR-002's rate limiting, on POST /login and POST /register.
+                // Before CsrfFilter, so a spray with no token is refused before
+                // it costs a session lookup; see RateLimitFilter for the cost
+                // of that ordering and for why this is constructed here rather
+                // than injected as a bean.
+                .addFilterBefore(new RateLimitFilter(rateLimiter, rateLimits.refuseRequests()),
+                        CsrfFilter.class)
+
                 .authorizeHttpRequests(authorize -> authorize
                         // Static assets. Listed explicitly rather than through
                         // PathRequest.toStaticResources(): that helper matches
@@ -65,7 +80,15 @@ class SecurityConfig {
                                 // so it has to be readable before anybody has
                                 // an account -- a privacy policy behind a login
                                 // is not one you can consent to.
-                                AuthPaths.PRIVACY)
+                                AuthPaths.PRIVACY,
+                                // The action listing. Public because the site
+                                // is a public directory, and because the
+                                // welcome email links here: a user who has
+                                // just confirmed their address is usually not
+                                // signed in yet, and sending them to a login
+                                // form is how that email had five dead links
+                                // and one misleading one.
+                                ActionPaths.LIST)
                         .permitAll()
 
                         // Default deny. Most of this site will end up public --

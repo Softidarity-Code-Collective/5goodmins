@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<!--/*
+  Page 1 of the frontend brief, the action list. STRUCTURAL PLACEHOLDER --
+  unstyled on purpose, the design is the frontend contributor's, and most of
+  what the brief asks of this page is not here at all: no filters, no search,
+  no htmx partial swap, no pagination, no active-filter summary.
+
+  It exists because the welcome email has a call to action and a link that
+  lands on a login form is the product's first impression (ADR-005).
+
+  WHAT MUST SURVIVE A REDESIGN.
+
+   * The empty state is a real state, not an oversight. A fresh deployment has
+     no published actions until the seed migration runs, and a blank page with
+     a heading reads as broken.
+   * The action type is labelled from the message bundle under a key built from
+     the enum constant, so adding a type is an enum constant plus two
+     properties lines and no template change (ADR-008, ADR-017).
+   * The excerpt is already cut to 200 characters by the query and abbreviated
+     to 160 here. Raising the number here without raising
+     ActionSummary.EXCERPT_CHARS silently abbreviates text SQL had already cut,
+     which loses the ellipsis that says it was cut.
+   * Titles are not links yet. The detail page is page 2; when it lands, the
+     link goes here and in the welcome email together.
+*/-->
+<html th:replace="~{layout :: page(#{action.list.title}, ~{::main})}"
+      xmlns:th="http://www.thymeleaf.org">
+<body>
+<main>
+
+    <h1 th:text="#{action.list.heading}">Actions</h1>
+
+    <p th:if="${#lists.isEmpty(actions)}" th:text="#{action.list.empty}">
+        Nothing active right now.
+    </p>
+
+    <ul th:unless="${#lists.isEmpty(actions)}">
+        <li th:each="action : ${actions}">
+            <p th:text="#{${'actionType.' + action.actionType}}">Petition</p>
+            <h2 th:text="${action.title}">An action</h2>
+            <p th:text="${#strings.abbreviate(action.excerpt, 160)}">One line about it.</p>
+        </li>
+    </ul>
+
+</main>
+</body>
+</html>

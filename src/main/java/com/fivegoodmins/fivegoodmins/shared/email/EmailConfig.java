@@ -6,8 +6,11 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.task.AsyncTaskExecutor;
+import org.springframework.http.client.ClientHttpRequestFactory;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.web.client.RestClient;
 import org.thymeleaf.spring6.templateresolver.SpringResourceTemplateResolver;
 import org.thymeleaf.templatemode.TemplateMode;
 
@@ -77,10 +80,18 @@ public class EmailConfig {
     }
 
     /**
-     * The transport: SMTP when one is configured, a sender that refuses
-     * otherwise.
+     * The transport, chosen once at startup: Brevo's HTTP API when an API key
+     * is configured, SMTP when a mail host is, and a sender that refuses
+     * loudly when neither is.
      *
-     * <p>One {@code @Bean} method with a branch, rather than two beans with
+     * <p><strong>Brevo wins when both are set, and that order is deliberate.</strong>
+     * {@code spring.mail.host} is set for everyone by application-dev.yaml, so
+     * it is not evidence of an intention; an API key is only ever present
+     * because somebody put it there. The practical effect is that a developer
+     * who exports the production key locally sends real mail, which is
+     * surprising exactly once and is the honest reading of what they asked for.
+     *
+     * <p>One {@code @Bean} method with a branch, rather than three beans with
      * conditions on them. {@code @ConditionalOnMissingBean} is documented as
      * being for auto-configuration and is evaluated in bean-definition
      * registration order, so a pair of conditional beans in application code
@@ -97,8 +108,41 @@ public class EmailConfig {
      */
     @Bean
     EmailSender emailSender(ObjectProvider<JavaMailSender> transport, EmailProperties properties) {
+        if (properties.brevo().isConfigured()) {
+            return new BrevoEmailSender(RestClient.builder().requestFactory(timeouts(properties)),
+                    properties);
+        }
         JavaMailSender smtp = transport.getIfAvailable();
         return smtp == null ? new UnconfiguredEmailSender() : new SmtpEmailSender(smtp, properties);
+    }
+
+    /**
+     * Connect and read timeouts on the provider call, applied here rather than
+     * inside {@link BrevoEmailSender} so that a test can hand that class a
+     * builder bound to {@code MockRestServiceServer} without this clobbering
+     * the mock's request factory.
+     *
+     * <p><strong>{@code RestClient.builder()} rather than Boot's
+     * auto-configured {@code RestClient.Builder} bean, which does not exist
+     * here.</strong> Boot 4 moved that auto-configuration into a
+     * {@code spring-boot-restclient} module which {@code -starter-webmvc} does
+     * not pull in, so asking for the bean fails the context at startup -- found
+     * by doing exactly that. Adding the module to get back a builder whose
+     * customizers nothing in this application uses would be a dependency for a
+     * one-line call. One {@code RestClient} exists here, it is built once, and
+     * this is the only place that configures it.
+     *
+     * <p>{@code SimpleClientHttpRequestFactory} -- the JDK's
+     * {@code HttpURLConnection} -- rather than a pooled client. One email at a
+     * time from one thread needs no connection pool, and the alternative is a
+     * dependency to justify (ADR-018's standing rule) for a call that happens
+     * a few hundred times a day.
+     */
+    private static ClientHttpRequestFactory timeouts(EmailProperties properties) {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(properties.brevo().connectTimeout());
+        factory.setReadTimeout(properties.brevo().readTimeout());
+        return factory;
     }
 
     /**

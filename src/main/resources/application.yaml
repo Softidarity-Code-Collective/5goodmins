@@ -29,8 +29,8 @@ server:
   # what most writing on this property still describes. Railway's proxy
   # therefore almost certainly lands inside it.
   #
-  # Still unverified on the live site, and it is one curl to verify -- against
-  # the *.up.railway.app domain, not 5goodmins.com, because Cloudflare can be
+  # Still unverified on the live site. The HSTS half is one curl -- against the
+  # *.up.railway.app domain, not 5goodmins.com, because Cloudflare can be
   # configured to add Strict-Transport-Security itself and would mask the
   # answer. Measured 2026-10-28: it is not adding it -- Cloudflare's own 502
   # error page, which it generates end to end, carries no HSTS -- so whatever
@@ -40,12 +40,74 @@ server:
   # that setting that property REPLACES the default list above rather than
   # extending it, so whatever Railway's hop needs has to be in the new value.
   #
-  # The rate limiting work needs one more property here: Cloudflare's published
-  # ranges in server.tomcat.remoteip.trusted-proxies, without which the valve
-  # stops at the Cloudflare edge and every request shares one bucket. Settled
-  # in ADR-002 ("the bucket key"), which also names the hop that same curl
-  # verifies: whether Railway appends to X-Forwarded-For or passes it through.
+  # The other half -- whether Railway's proxy appends to X-Forwarded-For or
+  # passes it through -- no curl can answer, because nothing reported the
+  # resolved address back. Something does now: RateLimitFilter logs the bucket
+  # key next to the raw remote address on every refusal, so twenty-one POSTs to
+  # /login print what the valve resolved. ADR-002 carries the reading.
   forward-headers-strategy: native
+
+  tomcat:
+    remoteip:
+      # Cloudflare's published edge ranges, so RemoteIpValve walks *past* the
+      # edge and lands on the real client (ADR-002, "the bucket key"). Without
+      # this the walk stops at the first entry matching neither proxy list --
+      # which is Cloudflare's public edge address -- and every request on the
+      # site shares one rate-limiting bucket, putting the whole country behind
+      # one /login limit.
+      #
+      # trusted-proxies, NOT internal-proxies. Boot gives internal-proxies a
+      # default value (the private ranges, 10/8 included), and setting that
+      # property REPLACES the default rather than extending it -- so the
+      # obvious-looking fix would stop trusting the hop Railway's own proxy
+      # arrives on, which is the hop this whole mechanism depends on.
+      # trusted-proxies is empty by default and therefore adds.
+      #
+      # The CIDR form is documented, not inferred. Tomcat 11 describes both
+      # internalProxies and trustedProxies as "either a comma separated list of
+      # CIDR blocks or a single regular expression", and adds: "Support for
+      # configuration via regular expressions is deprecated and will be removed
+      # in Tomcat 12." So CIDR is the form with a future, and the IPv4-only
+      # regex that older writing on this property describes is the one on a
+      # clock. (An earlier version of this comment justified CIDR by pointing
+      # at Boot's own default being one, which proves nothing about what the
+      # setter accepts -- corrected in review.)
+      #
+      # internal-proxies is deliberately not set, and this was checked rather
+      # than assumed. Boot 4.1.1's default for it, read out of
+      # spring-boot-tomcat's own configuration metadata, is:
+      #   192.168.0.0/16, 172.16.0.0/12, 169.254.0.0/16, fc00::/7,
+      #   10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, fe80::/10, ::1/128
+      # It is a CIDR list and it includes 100.64.0.0/10, the carrier-grade NAT
+      # range container platforms use -- spring-boot#34119, which reported that
+      # range missing from an older regex default, is fixed here. Railway's own
+      # hop is therefore covered by the default and overriding it would only
+      # risk dropping something.
+      #
+      # Fetched from https://www.cloudflare.com/ips-v4 and /ips-v6 on
+      # 2026-10-29. A committed list rather than a startup fetch: a fetch adds
+      # a boot-time dependency on Cloudflare's API for a file that changes once
+      # a year with notice.
+      #
+      # HOW THIS FAILS, stated accurately after review. If the walk stops short
+      # of the real client -- a stale list here, or a change at the edge -- then
+      # every request shares one bucket and /login allows twenty attempts per
+      # fifteen minutes FOR THE WHOLE SITE. That is not a safe state and
+      # calling it "over-restrictive, the right direction for a limiter to
+      # break" was wrong: it is a site-wide login outage whose symptom is
+      # "login is broken for everybody". It is still preferable to the limit
+      # being absent, and it is diagnosable in one line, because RateLimitFilter
+      # logs the resolved bucket key on every refusal -- a Cloudflare edge
+      # address there IS the diagnosis. The real mitigation is at the edge, not
+      # here: restrict the origin to Cloudflare so the chain is always the one
+      # this configuration describes.
+      trusted-proxies: >-
+        173.245.48.0/20, 103.21.244.0/22, 103.22.200.0/22, 103.31.4.0/22,
+        141.101.64.0/18, 108.162.192.0/18, 190.93.240.0/20, 188.114.96.0/20,
+        197.234.240.0/22, 198.41.128.0/17, 162.158.0.0/15, 104.16.0.0/13,
+        104.24.0.0/14, 172.64.0.0/13, 131.0.72.0/22,
+        2400:cb00::/32, 2606:4700::/32, 2803:f800::/32, 2405:b500::/32,
+        2405:8100::/32, 2a06:98c0::/29, 2c0f:f248::/32
 
   # Production values for the session cookie; application-dev.yaml relaxes
   # `secure`. These close the second half of the finding above: JSESSIONID was
@@ -134,8 +196,14 @@ spring:
 # APP_MAIL_FROM_NAME). Local runs get them from application-dev.yaml, tests from
 # src/test/resources/application.properties. See EmailProperties.
 #
-# spring.mail.* is absent too, but that one is not required: with no mail host
-# configured there is no JavaMailSender, and EmailConfig supplies a sender that
-# refuses loudly instead of one that silently discards. That is the state
-# production is in until the provider is chosen (section 5, week 7); the site
-# still starts and serves every page that does not send email.
+# app.mail.brevo.api-key is absent for the third time for the same reason, and
+# this one is a credential rather than a plausible wrong value: a committed
+# Brevo key is a stranger's ability to send mail as this domain. Production
+# supplies APP_MAIL_BREVO_API_KEY; the provider was chosen in week 7 on
+# free-tier limits (300/day, ADR-005) and the choice touches one class.
+#
+# spring.mail.* is absent too, and that one is genuinely optional: it exists
+# for Mailpit in development. EmailConfig picks Brevo when an API key is set,
+# SMTP when a mail host is, and a sender that refuses loudly when neither is --
+# so a deploy with no key still starts and still serves every page that does
+# not send email, and says so rather than discarding silently.

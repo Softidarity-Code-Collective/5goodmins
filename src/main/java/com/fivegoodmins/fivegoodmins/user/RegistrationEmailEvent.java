@@ -1,10 +1,14 @@
 package com.fivegoodmins.fivegoodmins.user;
 
+import com.fivegoodmins.fivegoodmins.action.ActionSummary;
+
+import java.util.List;
 import java.util.Locale;
 
 /**
- * What {@link RegistrationService#register} asks to be emailed once its
- * transaction has committed (ADR-005).
+ * What {@link RegistrationService} asks to be emailed once its transaction has
+ * committed (ADR-005) -- two events from {@code register} and one from
+ * {@code verifyEmail}.
  *
  * <p><strong>Both registration outcomes publish one of these, and that is the
  * requirement rather than a convention.</strong> {@code register} renders the
@@ -22,8 +26,9 @@ import java.util.Locale;
  * and entities do not leave the service layer anyway (ADR-013).
  *
  * <p>Sealed, so the listener's {@code switch} is exhaustive without a default
- * branch: a third registration email would be a compile error there rather
- * than an email that is quietly never sent.
+ * branch: a fourth registration email would be a compile error there rather
+ * than an email that is quietly never sent. {@code Welcome} was added that way
+ * -- the compiler named the one place it had to be handled.
  */
 sealed interface RegistrationEmailEvent {
 
@@ -79,5 +84,34 @@ sealed interface RegistrationEmailEvent {
      * anyone can reach.
      */
     record ExistingAccount(long userId, String email, String displayName, Locale locale)
+            implements RegistrationEmailEvent { }
+
+    /**
+     * An address that has just been confirmed: welcome its owner and show them
+     * what is on the site (ADR-005).
+     *
+     * <p><strong>Published from the transition, not from the request.</strong>
+     * {@code verifyEmail} is reached by a link that mail clients prefetch and
+     * that users click twice, so "confirmed" is a page three different inputs
+     * can produce. Only one of them actually writes {@code email_verified_at},
+     * and that write is where this event is published -- so the welcome is sent
+     * exactly once with no column to record that it was. "Has the welcome been
+     * sent?" is answered by {@code email_verified_at IS NOT NULL}, which is
+     * ADR-005's reason for not adding one.
+     *
+     * @param actions the five newest active actions, loaded inside the
+     *                confirming transaction and carried here as projections for
+     *                the same reason this event carries no entity: by the time
+     *                the listener runs there is no persistence context to load
+     *                them from. Unpersonalized, because subscriptions are
+     *                usually not set at this moment (ADR-005) -- and possibly
+     *                empty, on a site with nothing published yet, which the
+     *                template has to say rather than render as a blank gap.
+     */
+    record Welcome(long userId,
+                   String email,
+                   String displayName,
+                   Locale locale,
+                   List<ActionSummary> actions)
             implements RegistrationEmailEvent { }
 }
