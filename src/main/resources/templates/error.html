@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!--/*
+  The fallback error page, and the canonical comment for the error/ directory
+  next to it.
+
+  WHY THIS FILE IS HERE AND NOT IN error/, WHICH WAS MEASURED THE HARD WAY.
+  Boot resolves a specific page through DefaultErrorViewResolver, which tries
+  error/<status> and then the series, error/4xx and error/5xx. The last
+  fallback is different in kind: BasicErrorController returns the view NAME
+  "error", which the Thymeleaf resolver turns into templates/error.html. So a
+  file at error/error.html is never consulted -- the first version of this
+  file was exactly that, and the test for it read Boot's whitelabel page back
+  off the socket, which is how the mistake was caught rather than shipped.
+
+  404, 403, 500 and 429 have their own pages because they have something
+  specific to say. Every other status lands here: a 400 from a hand-edited
+  query parameter, a 405 from a crawler, a 415 from something odd. Before this
+  file existed all of them were the whitelabel page. STRUCTURAL PLACEHOLDER --
+  the design is yours, and whatever you do to the four named pages should be
+  done to this one too, because this is the one a status nobody anticipated
+  gets.
+
+  THE TWO RULES EVERY PAGE IN THIS DIRECTORY OBEYS.
+
+  (1) Nothing renders anything that came off the request. Boot's error model
+      IS available here -- ${timestamp}, ${status}, ${error} and ${path}, with
+      ${message} and the stack trace off by default -- and ${path} is whatever
+      URL the visitor asked for. Printing it is a reflected-XSS hole on the one
+      page nobody tests, so no page here prints it. This was measured rather
+      than assumed: a probe rendered ${status} and ${path} into error/429.html
+      and read back 429 and /register off the socket.
+
+      If a design ever wants the status number on the page, ${status} is the
+      attribute to use -- it comes from the container, not from the visitor.
+
+  (2) What is NOT here is the model the failed request was building: no action,
+      no form object, no filter state. The page has to make sense knowing
+      nothing about what the visitor was doing, so there is no "back to the
+      action you were viewing" -- only the one link home.
+
+  Renaming any file in here is what breaks it: the filename is the contract and
+  there is no mapping to read.
+*/-->
+<html th:replace="~{layout :: page(#{error.fallback.title}, ~{::main})}"
+      xmlns:th="http://www.thymeleaf.org">
+<body>
+<main id="main" tabindex="-1">
+
+    <h1 th:text="#{error.fallback.heading}">Error</h1>
+    <p th:text="#{error.fallback.body}">Something went wrong.</p>
+
+    <a th:href="@{/}" th:text="#{error.backHome}">Back to the start</a>
+
+</main>
+</body>
+</html>

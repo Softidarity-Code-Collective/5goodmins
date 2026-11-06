@@ -127,15 +127,11 @@ class RateLimitHttpTest {
         // ...inside the layout, which is the half that distinguishes this from
         // the whitelabel page this refusal rendered until the template existed.
         assertThat(refused.body()).contains("5 Good Minutes", "id=\"main\"");
-        // And no interval, which is the copy's one deliberate omission: a
-        // number here would publish the shape of the bucket, and there is no
-        // honest single number to publish anyway -- the two request-refusing
-        // buckets have different windows and this page cannot read back the
-        // Retry-After the filter set. Asserted on the word rather than on
-        // digits, because a digit can arrive from anywhere in the layout.
-        assertThat(refused.body())
-                .as("the copy names no interval")
-                .doesNotContain("минут");
+        // Nothing here asserts that the copy names no interval, though it
+        // does and ADR-002 says why. The first version asserted it as
+        // doesNotContain("минут"), which is a trap in a product called
+        // "5 добри минути": the day the layout carries the brand in
+        // Bulgarian, that line fails and names the wrong cause.
     }
 
     private HttpResponse<String> login(HttpClient client) throws IOException, InterruptedException {

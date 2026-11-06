@@ -93,9 +93,10 @@ So the work that is genuinely unblocked right now is:
 2. The base layout and the fragments in section 5. Four of them already exist
    as unstyled placeholders (layout, flash) or as lists on the style guide
    page (badges); the rest are yours from scratch.
-3. The six pages that exist, plus the four error pages. All four are now
-   structural placeholders with their copy written, `error/429.html`
-   included — the design is what is missing, not the strings.
+3. The six pages that exist, plus the five error pages — the four named
+   statuses and the fallback at `templates/error.html`. All five are
+   structural placeholders with their copy written; the design is what is
+   missing, not the strings.
 4. The two built email templates.
 5. Wireframes for the action list and detail pages, which is where the design
    is actually decided, against the seed content described in section 3.
@@ -359,7 +360,7 @@ valid title.
 
 | # | Page | Notes |
 |---|---|---|
-| 19 | **404 / 403 / 500 / 429** | *All four built, design yours.* Real pages in the site layout, not stack traces, at `templates/error/<status>.html` — the filename is what Spring Boot resolves, so renaming the file is what breaks it. 404 matters: deleted actions land here from old digest links, and from the welcome email, whose action links point at page 2 before page 2 exists. **429 is the odd one and worth reading before you restyle it:** it is the only error page reached by a POST rather than a link, because the rate limiter on `/login` and `/register` (ADR-002) refuses through the error dispatch with a `Retry-After` header, precisely so the user-facing string lives in the bundle rather than in Java. Its copy deliberately names **no interval** — a number would publish the shape of the bucket, and there is no honest single number to publish, since the two request-refusing buckets have different windows and the page cannot read the `Retry-After` back. Do not add one in the design. Caveat on all four: until more public paths are named in `SecurityConfig`, an unknown URL redirects an anonymous visitor to the login form instead of reaching the 404 page. |
+| 19 | **404 / 403 / 500 / 429 / fallback** | *All five built, design yours.* **There are five, not four:** `templates/error.html` is the fallback every other status resolves to — a 405 from a crawler, a 415, a 400 from a hand-edited query parameter — and it lives at the templates root rather than in `error/`, because that is the one Boot resolves by view name. Style it with the others; it is the page an unanticipated status gets. Real pages in the site layout, not stack traces, at `templates/error/<status>.html` — the filename is what Spring Boot resolves, so renaming the file is what breaks it. 404 matters: deleted actions land here from old digest links, and from the welcome email, whose action links point at page 2 before page 2 exists. **429 is the odd one and worth reading before you restyle it:** it is the only error page reached by a POST rather than a link, because the rate limiter on `/login` and `/register` (ADR-002) refuses through the error dispatch with a `Retry-After` header, precisely so the user-facing string lives in the bundle rather than in Java. Its copy deliberately names **no interval** — the reason is in ADR-002 and it is a security one. Do not add a countdown or a "try again in N minutes" to the design. Caveat on all four: until more public paths are named in `SecurityConfig`, an unknown URL redirects an anonymous visitor to the login form instead of reaching the 404 page. |
 | 20 | **Report an action** | Small form: reason (select, includes "no longer live") + optional text. Modal or small page, submitted via htmx. |
 
 ### Emails (4)

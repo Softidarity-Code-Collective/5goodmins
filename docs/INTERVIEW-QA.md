@@ -1066,26 +1066,38 @@ string in Java, which this project forbids (ADR-008), or a blank page, which
 tells a human nothing.
 
 The copy says what happened, that it is temporary, and to come back later. It
-names **no interval**, and that is the part with a reason behind it. Two
-reasons, actually. A number on the page states the shape of the bucket, and
-the window is the one thing about this mechanism an attacker cannot already
-measure cheaply — they know they were refused, they do not know whether to
-come back in a minute or an hour. And there is no honest single number to
-print: one template serves a fifteen-minute login window and an hour-long
-registration window, and the template cannot read back the `Retry-After` the
-filter set, because Thymeleaf 3.1 removed the `#response` context object and
-the error dispatch carries no model attribute from the failed request.
+names **no interval**, and the reason is security: a number on the page states
+the shape of the bucket, which is the one thing about this mechanism an
+attacker cannot already measure cheaply. They know they were refused; they do
+not learn whether to come back in a minute or an hour. One template also
+serves two windows — fifteen minutes for login, an hour for registration — so
+there is no single number that would be true anyway.
 
-So the number lives in the header, where the clients that can act on it read
-it, and the page speaks to the human who cannot. The cost is real and I would
-state it in a review: a legitimate user behind a shared carrier-grade NAT
-address, refused for something a neighbour did, is told to wait without being
-told how long.
+**The part I would volunteer, because it is where I was wrong.** I first
+defended this as a technical limitation: the template "cannot" read the
+`Retry-After` back. That is false. Boot's error model is right there on the
+page — `${timestamp}`, `${status}`, `${error}`, `${path}` — and I only know it
+is because I rendered `${status}` and `${path}` into the 429 template and read
+`429` and `/register` back off the socket. Exposing the window would take a
+custom `ErrorAttributes`; it is declined, not impossible. And that same probe
+explains why no page in that directory prints `${path}`: it is whatever URL the
+visitor asked for, so printing it is reflected XSS on the one page nobody
+tests. Leaning on the technical claim made the weaker argument *and* the more
+fragile one, because the security reason stands perfectly well alone.
+
+The cost is real and I would state it in a review: a legitimate user behind a
+shared carrier-grade NAT address, refused for something a neighbour did, is
+told to wait without being told how long.
 
 ### Q: Where does the action list keep its filter state? **[WARM]**
 
 In the URL, and that is the decision the rest of page 1 falls out of
-(ADR-022). `GET /actions?category=HUMAN_RIGHTS&region=SOFIA&q=...&page=2`.
+(ADR-022). `GET /actions?category=HUMAN_RIGHTS&region=SOFIA_CITY&q=...&page=2`
+— `SOFIA_CITY`, not `SOFIA`, and the distinction is the sort of thing worth
+being exact about in an interview: the enum has `SOFIA_CITY` and
+`SOFIA_PROVINCE` because the city and the province around it are different
+places to organise in, and an invented constant in a URL would be dropped
+silently by the rule two paragraphs down.
 Not the session, not a POST body, not a cookie.
 
 The product reason is that a filtered list is a thing people send each other
@@ -1104,10 +1116,19 @@ things, a full page and an htmx fragment, branching on the `HX-Request`
 header. I chose that over a second `/actions/results` path so the URL htmx
 fetches and the URL pushed into the address bar are the same string — one
 place building the query, and a pushed URL that still works when pasted into a
-fresh tab. The cost is a `Vary: HX-Request` on the response, which is not
-optional with Cloudflare in front: without it a cached fragment eventually
-gets served to a browser that asked for the page, and the symptom is a blank
-screen rather than an error.
+fresh tab.
+
+**The risk that creates is a cache serving a fragment to a browser that asked
+for the page, and I had the mechanism wrong at first.** I wrote that
+`Vary: HX-Request` is what prevents it. It is not — Cloudflare does not vary
+on a custom request header unless you configure it to in Cache Rules, so that
+header was protecting nothing. What actually holds is that Cloudflare does not
+cache HTML by default and every response already carries
+`Cache-Control: no-store` from Spring Security's default headers. The `Vary`
+stays because it is the correct description of the response for any cache that
+does honour it, but it is honesty rather than the mechanism. If I ever put HTML
+behind an edge cache, `no-store` is the first thing to check and `Vary` is not
+a substitute for it.
 
 ### Q: Why two buckets on registration? **[DEEP]**
 

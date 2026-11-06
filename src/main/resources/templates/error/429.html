@@ -4,23 +4,20 @@
   trace and not Boot's whitelabel page. STRUCTURAL PLACEHOLDER -- the design
   is yours.
 
-  Spring Boot finds this by filename: error/<status>.html, resolved by
-  BasicErrorController on the ERROR dispatch. Renaming the file is what
-  breaks it, so the name is the contract and there is no mapping to read.
-
-  Two things must survive. Nothing here may be user-supplied or come off the
-  request -- an error page that echoes the path it was reached by is a
-  reflected-XSS hole on the one page nobody tests. And no model attribute
-  from the failed request is available, so the page has to make sense knowing
-  nothing: no "back to the action you were viewing".
+  The rules every page in this directory obeys, and the measurement behind
+  them, are in templates/error.html -- the fallback page one directory up --
+  rather than repeated in five files: the filename is
+  the contract, nothing renders ${path} or anything else off the request, and
+  the model the failed request was building is not available here.
 
   Specific to this one, because it is the only error page reached by a POST:
   RateLimitFilter refuses POST /login and POST /register with sendError(429)
   (ADR-002), which is why this template exists at all -- the refusal was
   routed through the error dispatch so that the user-facing string could live
   in the bundle rather than in Java. The filter sets Retry-After before it
-  refuses, for clients that read headers; this page cannot read it back, and
-  that is the reason the copy names no number. See error.429.body.
+  refuses, for clients that read headers. The page deliberately names no
+  interval, which is a security decision and not a limitation of the
+  template; the reasoning is in ADR-002 and is not repeated here.
 */-->
 <html th:replace="~{layout :: page(#{error.429.title}, ~{::main})}"
       xmlns:th="http://www.thymeleaf.org">
