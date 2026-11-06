@@ -3,6 +3,7 @@ package com.fivegoodmins.fivegoodmins.shared.security;
 import com.fivegoodmins.fivegoodmins.action.ActionPaths;
 import com.fivegoodmins.fivegoodmins.shared.AuthPaths;
 import com.fivegoodmins.fivegoodmins.shared.ratelimit.RateLimitFilter;
+import com.fivegoodmins.fivegoodmins.subscription.SubscriptionPaths;
 import com.fivegoodmins.fivegoodmins.shared.ratelimit.RateLimitProperties;
 import com.fivegoodmins.fivegoodmins.shared.ratelimit.RateLimiter;
 import org.springframework.context.annotation.Bean;
@@ -110,7 +111,24 @@ class SecurityConfig {
                                 // signed in yet, and sending them to a login
                                 // form is how that email had five dead links
                                 // and one misleading one.
-                                ActionPaths.LIST)
+                                ActionPaths.LIST,
+                                // The digest's unsubscribe link, and the one
+                                // path here that is a legal requirement rather
+                                // than a convenience (ADR-005). It must work
+                                // with no session at all: a reader holding a
+                                // digest has no reason to be signed in, and an
+                                // opt-out behind a login form is not an
+                                // opt-out. Both methods -- the GET renders the
+                                // confirmation, the POST performs it, which is
+                                // two steps so that a mail client prefetching
+                                // the link cannot unsubscribe somebody.
+                                //
+                                // The authorisation is the signed token rather
+                                // than a session (TokenPurpose.UNSUBSCRIBE),
+                                // which is also why this entry is safe to be
+                                // this broad: the path is public, the write
+                                // behind it is not.
+                                SubscriptionPaths.UNSUBSCRIBE)
                         .permitAll()
 
                         // Default deny. Most of this site will end up public --

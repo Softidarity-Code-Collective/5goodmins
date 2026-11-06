@@ -62,12 +62,43 @@ public class EmailComposer {
      *              key is absent for this locale
      */
     public EmailMessage compose(String to, Locale locale, EmailTemplate template, Map<String, Object> model) {
+        return compose(to, locale, template, model, null);
+    }
+
+    /**
+     * The same, for an email whose subject takes {@code MessageFormat}
+     * arguments.
+     *
+     * <p><strong>Added for the digest, and for a reason that is about mail
+     * clients rather than about copy.</strong> The other three emails have
+     * fixed subjects and are sent once each. The digest goes to the same
+     * address every morning, and Gmail, Outlook and Apple Mail all thread
+     * consecutive messages that share a subject -- so a constant subject means
+     * a month of digests collapsing into one collapsed conversation, with
+     * yesterday's unread. Putting the number of new actions in the subject
+     * makes it vary, and is also the one piece of information that decides
+     * whether this particular morning's email is worth opening.
+     *
+     * <p>An overload rather than a changed signature, so the three existing
+     * callers are untouched and the common case stays the shorter call.
+     *
+     * @param subjectArguments arguments for the subject key, or null for none.
+     *                         <strong>Never user-supplied text:</strong> the
+     *                         subject is the one field in a message where a
+     *                         line break ends the field and begins a new
+     *                         header, which is why {@code EmailMessage}
+     *                         rejects one. A count is safe; a display name is
+     *                         not, and belongs in a body where the template
+     *                         engine escapes it.
+     */
+    public EmailMessage compose(String to, Locale locale, EmailTemplate template,
+                                Map<String, Object> model, Object[] subjectArguments) {
         Map<String, Object> variables = new HashMap<>(model);
         variables.put(SITE_URL, properties.baseUrl());
         Context context = new Context(locale, variables);
         return new EmailMessage(
                 to,
-                messages.getMessage(template.subjectKey(), null, locale),
+                messages.getMessage(template.subjectKey(), subjectArguments, locale),
                 templates.process(template.name(), context),
                 templates.process(template.textName(), context));
     }

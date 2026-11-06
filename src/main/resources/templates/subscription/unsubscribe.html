@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<!--/*
+  Page 9 of the frontend brief, first half: the unsubscribe confirmation.
+  STRUCTURAL PLACEHOLDER -- the design is the frontend contributor's.
+
+  Reached from the link in every digest email, by somebody who is almost
+  certainly NOT signed in, and it has to work that way (ADR-005). This is a
+  legal requirement rather than a feature.
+
+  WHAT MUST SURVIVE A REDESIGN.
+
+   * IT STAYS A FORM WITH A POST. The obvious simplification -- unsubscribe on
+     the GET and show "done" -- is the one thing this page must not do. Mail
+     clients and link scanners prefetch URLs in email; ADR-005 already depends
+     on that being true when it explains how the welcome email is sent exactly
+     once. A GET that unsubscribed would be performed by Gmail's prefetcher or
+     Outlook's Safe Links, and the reader would find out by not receiving
+     tomorrow's digest. One button for the reader either way.
+   * th:action, not action, so Thymeleaf's Spring dialect adds the CSRF hidden
+     input. An anonymous visitor still gets a token; without the input the POST
+     is a 403 and the opt-out is broken for everybody.
+   * The token travels in the hidden field. It is the entire authorisation --
+     there is no session here -- so a form that loses it posts nothing usable.
+   * <main> keeps id="main", or the layout's skip link points at nothing.
+
+  The token is deliberately NOT validated before this page renders. Checking it
+  on the GET would turn the page into an oracle that says whether a given token
+  is genuine, answerable without posting anything; the POST gives that answer
+  once, to somebody who asked for it. So this page looks identical for a real
+  link, a mangled one, and no token at all.
+*/-->
+<html th:replace="~{layout :: page(#{subscription.unsubscribe.title}, ~{::main})}"
+      xmlns:th="http://www.thymeleaf.org">
+<body>
+<main id="main" tabindex="-1">
+
+    <h1 th:text="#{subscription.unsubscribe.heading}">Unsubscribe</h1>
+    <p th:text="#{subscription.unsubscribe.body}">Confirm that you no longer want the daily
+        digest.</p>
+
+    <form th:action="@{/unsubscribe}" method="post">
+        <input type="hidden" name="token" th:value="${token}">
+        <button type="submit" th:text="#{subscription.unsubscribe.submit}">Unsubscribe me</button>
+    </form>
+
+    <!--/*
+      The other answer, and worth offering: most people who want fewer emails
+      want a narrower digest rather than none. Behind a login, which is correct
+      -- changing what you follow is an account setting -- and an anonymous
+      reader following it gets the login form, which is the honest outcome
+      rather than a broken link.
+    */-->
+    <p>
+        <span th:text="#{subscription.unsubscribe.alternative}">Prefer fewer emails instead?</span>
+        <a th:href="@{/preferences}" th:text="#{subscription.unsubscribe.alternativeLink}">Change
+            your preferences</a>
+    </p>
+
+</main>
+</body>
+</html>

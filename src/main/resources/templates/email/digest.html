@@ -1,0 +1,158 @@
+<!--/*
+  Email 3 of 4, and the flagship (ADR-005, frontend brief §4): the actions
+  published since this reader was last told, matching what they follow.
+
+  STRUCTURAL PLACEHOLDER like the other three -- the table scaffolding, the
+  dark-scheme overrides and the 600px cap come from email/layout.html, and the
+  design inside is the frontend contributor's.
+
+  WHAT MUST SURVIVE A REDESIGN.
+
+   * THE UNSUBSCRIBE LINK, which is a legal requirement and not a footer
+     nicety (ADR-005). It is the one thing in this file that must not be
+     dropped, moved behind a login, or made conditional. It works signed-out,
+     it is the reason TokenPurpose.UNSUBSCRIBE is signed for ten years, and
+     this email is the ONLY one of the four that carries it -- an unsubscribe
+     link on a verification email is an invitation to opt out of the thing the
+     reader is in the middle of doing.
+   * There is no empty state, and that is deliberate rather than missing:
+     DigestService does not send this email at all when nothing matches, so a
+     digest with no actions is not a state that exists. Adding an "nothing new
+     today" variant would mean mailing every subscriber every morning to say
+     nothing, which is how a digest becomes the thing people unsubscribe from.
+   * The type label and every badge come from the message bundle under a key
+     built from the enum constant -- action.type.X, category.X, region.X -- so
+     adding a category or a type is an enum constant plus two properties lines
+     and no template change (ADR-008, ADR-009, ADR-017).
+   * The excerpt is already cut to 200 characters in SQL (ActionSummary.
+     EXCERPT_CHARS) and abbreviated to 140 here. Raising this number without
+     raising that one abbreviates text SQL had already cut and loses the
+     ellipsis that says so.
+
+  WHAT IS OWED. The actions are listed as TEXT, not as links, exactly as the
+  welcome email lists them and for the same reason: the action detail page is
+  page 2 of the brief and does not exist, so ActionPaths has no detail(id) and
+  there is nowhere for a per-action link to point. The single call to action
+  goes to the listing. This is worse here than in the welcome email -- a digest
+  whose whole purpose is to send people to specific actions, going out every
+  morning -- and it is still better than mailing dead links daily. When page 2
+  lands, the link goes into this template, the welcome email and the listing
+  together. Recorded as the first open point in ADR-005.
+
+  Model: displayName, actions (DigestAction: id, title, actionType, excerpt,
+  categories, regions), actionsUrl, unsubscribeUrl. siteUrl comes from the
+  composer; the subject takes the action count as its one argument.
+*/-->
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org"
+      th:replace="~{email/layout :: page(
+                      #{email.digest.subject(${#lists.size(actions)})},
+                      #{email.digest.preheader(${#lists.size(actions)})},
+                      ~{:: #content})}">
+<body>
+<div id="content"
+     style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; font-size:16px; line-height:24px;">
+
+    <p class="text" style="margin:16px 0 12px 0; color:#172424;"
+       th:text="#{email.digest.greeting(${displayName})}">Hello,</p>
+
+    <p class="text" style="margin:0 0 24px 0; color:#172424;"
+       th:text="#{email.digest.intro(${#lists.size(actions)})}">Here is what is new.</p>
+
+    <!--/*
+      A table per action rather than a <ul>, for the reason the welcome email
+      gives: Outlook's Word engine applies its own indentation and bullet to a
+      list and ignores most attempts to restyle it, so five list items are five
+      different layouts across clients. A one-cell table renders the same
+      everywhere.
+    */-->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+           th:each="action : ${actions}" style="margin:0 0 20px 0;">
+        <tr>
+            <td style="padding:0;">
+                <p class="muted" style="margin:0 0 2px 0; font-size:12px; line-height:18px; text-transform:uppercase; letter-spacing:0.04em; color:#5c6b6b;"
+                   th:text="#{${'action.type.' + action.actionType}}">Petition</p>
+
+                <!--/*
+                  Not a link -- see the note at the top of this file. The
+                  heading is the action's own title, escaped by th:text because
+                  it is user-supplied.
+                */-->
+                <p class="text" style="margin:0 0 4px 0; font-size:17px; line-height:24px; font-weight:700; color:#172424;"
+                   th:text="${action.title}">An action</p>
+
+                <p class="muted" style="margin:0 0 6px 0; font-size:14px; line-height:21px; color:#5c6b6b;"
+                   th:text="${#strings.abbreviate(action.excerpt, 140)}">One line about it.</p>
+
+                <!--/*
+                  The badges, which are what makes this email the digest rather
+                  than a list of titles: they are the evidence that the
+                  selection is personal. ADR-005 left them out of the welcome
+                  email because one query per action or a duplicating join were
+                  the only options it considered; DigestActionRepository fetches
+                  them in one query per facet for every action at once instead.
+
+                  Rendered as text separated by a middle dot rather than as
+                  styled pills: a pill is a background colour and a border
+                  radius, which Outlook renders unpredictably and which is the
+                  designer's call anyway. The semantics -- which categories,
+                  which regions, in that order -- are what must survive.
+                */-->
+                <p class="muted" style="margin:0; font-size:12px; line-height:18px; color:#5c6b6b;">
+                    <span th:each="category, iteration : ${action.categories}">
+                        <span th:text="#{${'category.' + category}}">Nature</span>
+                        <span th:unless="${iteration.last}" aria-hidden="true">&middot;</span>
+                    </span>
+                    <span aria-hidden="true" style="padding:0 4px;">|</span>
+                    <span th:each="region, iteration : ${action.regions}">
+                        <span th:text="#{${'region.' + region}}">Varna</span>
+                        <span th:unless="${iteration.last}" aria-hidden="true">&middot;</span>
+                    </span>
+                </p>
+            </td>
+        </tr>
+    </table>
+
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px 0;">
+        <tr>
+            <td align="center" bgcolor="#0f766e" style="background-color:#0f766e; border-radius:6px;">
+                <a th:href="${actionsUrl}" th:text="#{email.digest.cta}"
+                   style="display:inline-block; padding:14px 28px; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; font-size:16px; font-weight:700; color:#ffffff; text-decoration:none;">
+                    See all actions
+                </a>
+            </td>
+        </tr>
+    </table>
+
+    <!--/*
+      THE UNSUBSCRIBE LINK. Required by law, in the email body rather than only
+      in a header, and signed so that it works with no login (ADR-005).
+
+      In this template rather than in email/layout.html, which carries the
+      footer every email shares: the layout is used by all four emails and the
+      other three must NOT have this. Putting it there behind a th:if on
+      whether the variable exists would make "does this email unsubscribe
+      people from anything?" a question answered by whether a model key was
+      forgotten.
+
+      Separated by a rule and worded as a sentence rather than a bare "click
+      here": the reader should be able to tell what they are unsubscribing from
+      before they click, since the preferences page is the other answer and
+      most people who want fewer emails want that one.
+    */-->
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+            <td class="muted"
+                style="padding:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif; font-size:12px; line-height:18px; color:#5c6b6b;">
+                <hr class="rule" style="border:0; border-top:1px solid #e3e9e9; margin:0 0 12px 0;">
+                <p style="margin:0;">
+                    <span th:text="#{email.digest.unsubscribe.before}">Do not want this email?</span>
+                    <a th:href="${unsubscribeUrl}" th:text="#{email.digest.unsubscribe.link}"
+                       style="color:#0f766e; text-decoration:underline;">Unsubscribe</a>
+                </p>
+            </td>
+        </tr>
+    </table>
+</div>
+</body>
+</html>

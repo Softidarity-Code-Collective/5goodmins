@@ -28,8 +28,11 @@ class UnverifiedAccountPurgeJob {
      * 03:30 UTC. Explicitly UTC rather than the JVM's default zone, which on
      * Railway is whatever the base image decided: a job whose hour moves with
      * the host is a job that silently changes its relationship to the digest.
-     * Half past, so it does not start in the same minute as the nightly digest
-     * at 03:00 (ADR-005) and compete with it for the single scheduler thread.
+     * The digest is deliberately nowhere near this: it runs at 07:00
+     * Europe/Sofia, because it is timed for a reader's morning rather than for
+     * a quiet server (ADR-005). That leaves at least half an hour in either
+     * season, which matters only because the scheduler has one thread
+     * (SchedulingConfig) and two jobs in the same minute would queue.
      *
      * <p>Nothing depends on the exact time. The purge is a cleanup with no
      * deadline -- a row deleted at seven days or at eight is the same row --

@@ -329,7 +329,7 @@ valid title.
 | 6 | **Register** | *Backend built, design yours.* Email, password, password confirmation, display name, consent checkbox for the privacy policy. |
 | 7 | **Login** | *Backend built, design yours.* Email, password. Errors are deliberately vague ("wrong email or password"). |
 | 8 | **Verification notice / result** | *Backend built, design yours.* "Check your inbox", plus the page the emailed link lands on. Three result states, and **none of them offers to resend** (ADR-002 cut the resend form): **confirmed** — success, link to log in; **already confirmed** — same reassuring tone, not an error, since a second click or a mail client prefetching the link is ordinary; **dead link** — the link expired or the unconfirmed account was purged after seven days, so the only action is a link back to Register, which re-issues a fresh email. The "check your inbox" state must also be what a user sees after registering an address that already has a confirmed account — identical page, identical wording, so the form cannot be used to discover who has an account here. **This page carries the only recovery there is — see below.** |
-| 9 | **Unsubscribe confirmation** | Reached from a digest email link, **works without login**. One page: confirm, done. |
+| 9 | **Unsubscribe confirmation** | *Backend built, design yours.* Reached from a digest email link, **works without login** — a legal requirement, not a convenience. **Two requests, and it must stay that way:** `GET /unsubscribe?token=…` renders a confirmation carrying the token in a hidden field, `POST` performs it. The obvious simplification — unsubscribe on the GET — is the one thing this page must not do, because mail clients and link scanners prefetch URLs in email and would opt the reader out on their behalf. Still one click for the reader. Two result states: **done** (reassuring, and it says the account itself is untouched) and **dead link** (one state for a forged token and for an account that no longer exists — not an error page, because there is nothing to retry). Offers the preferences page as the softer alternative. |
 
 ### Signed in
 
@@ -338,7 +338,7 @@ valid title.
 | 10 | **Submit action** | The most complex form in the app, and the one worth designing first. Title, description, type (select), categories (multi, max 3), regions (multi, max 3), external URL, end date, image upload, optional video URL. Needs inline validation, character counters, and an explanatory state for `USER`s: "your action will be reviewed before publishing." |
 | 11 | **Edit action** | Same form, pre-filled. |
 | 12 | **My actions** | The user's own actions grouped or badged by status, with actions per row: edit, withdraw, re-publish, delete. This is the only place `PENDING` / `REJECTED` / `WITHDRAWN` are visible. A poster cannot leave `REJECTED` directly: editing a rejected action returns it to `PENDING`, so that row's button says "edit and resubmit", not "re-publish". |
-| 13 | **Subscription preferences** | Pick categories and regions to follow; toggle the daily digest on/off. |
+| 13 | **Subscription preferences** | *Backend built, design yours.* Pick categories and regions to follow; toggle the daily digest on/off. **The one thing that must survive: ticking nothing means *everything*, and the page has to say so** (`subscription.preferences.allHint`) — sixty empty checkboxes above a live digest otherwise reads as a form that does not work. Checkbox names stay `categories` / `regions` with the enum constant as the value, and the lists come from `TaxonomyModel`. What is **not** built and is yours: any grouping of thirty regions into something scannable, a filter over them, and select-all/none. |
 | 14 | **Edit profile** | Display name, bio, website, interface language. |
 | 15 | **Account settings** | Change password; delete account behind a clear, scary confirmation (it permanently deletes their actions too). |
 
@@ -377,15 +377,41 @@ link to opt out of the thing the user is in the middle of doing.
    on a fresh deployment sees no actions at all, and a silent hole where a list
    should be reads as a broken email. There is **no unsubscribe link**, by
    decision rather than omission (see the paragraph above this list). And there
-   is no mention of the daily digest, because the job does not exist yet; that
-   line is owed, and it lands with the job rather than with the design.
+   it **does** now mention the daily digest — that line was deliberately absent
+   until the job existed, because "you will now receive a daily digest" is a lie
+   in somebody's inbox until something sends one, and it landed with the job.
+   It is not a second link (the preferences page is behind a login and a
+   just-confirmed reader is usually not signed in), but it does say the digest
+   can be narrowed or stopped.
    **The actions are listed as text, not as links** — the detail page is page 2,
    and a first email carrying five links to a page that does not exist is worse
    than five plain headings. The call to action is the email's only link. When
    page 2 lands the link goes into this template and the listing together.
 3. **Daily digest** — the flagship email: new actions matching the user's
-   subscriptions, each as a title, category/region badges, one line, a link.
-   Must survive Gmail, Outlook and Apple Mail.
+   subscriptions, each as a title, category/region badges and one line.
+   **Built**, structural placeholder like the others. Must survive Gmail,
+   Outlook and Apple Mail. Four things must survive a redesign.
+   **The unsubscribe link**, a legal requirement rather than footer decoration,
+   lives in this template and deliberately not in `email/layout.html`, so the
+   other three emails cannot acquire one by accident.
+   **There is no empty state and must not be one** — the job sends no email at
+   all when nothing matches, and a "nothing new today" variant would mean
+   mailing every subscriber every morning to say nothing, which is how a digest
+   becomes the thing people unsubscribe from.
+   **Every badge and type label comes from the bundle** under a key built from
+   the enum constant, so adding a category is an enum constant plus two
+   properties lines.
+   And the subject carries the **number** of new actions, which is not copy
+   polish: Gmail, Outlook and Apple Mail all thread consecutive messages sharing
+   a subject, so a constant one collapses a month of digests into a single
+   conversation with yesterday's still unread.
+   **What is owed:** the per-action link this brief asks for does not exist. The
+   destination is page 2, which does not, so the actions are listed as text with
+   one call to action pointing at the listing — the same decision as the welcome
+   email and a worse one here, since a digest's whole purpose is to send people
+   to specific actions and it goes out every morning. Still better than mailing
+   dead links daily. When page 2 lands, the link goes into `email/digest.html`,
+   `email/welcome.html` and the listing template together.
 4. **"You already have an account"** — sent when someone registers an address
    that already has a confirmed account. **Built.** Not in the original three,
    and not optional: the registration form must answer identically for every

@@ -1,6 +1,8 @@
 [(#{email.welcome.greeting(${displayName})})]
 
 [(#{email.welcome.intro})]
+
+[(#{email.welcome.digest})]
 [# th:if="${not #lists.isEmpty(actions)}"]
 [(#{email.welcome.newest})]
 [# th:each="action : ${actions}"]
