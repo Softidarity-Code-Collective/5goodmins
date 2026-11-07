@@ -1085,9 +1085,15 @@ visitor asked for, so printing it is reflected XSS on the one page nobody
 tests. Leaning on the technical claim made the weaker argument *and* the more
 fragile one, because the security reason stands perfectly well alone.
 
-The cost is real and I would state it in a review: a legitimate user behind a
-shared carrier-grade NAT address, refused for something a neighbour did, is
-told to wait without being told how long.
+The cost is real and I would state it in a review, and it got slightly worse
+on purpose. A legitimate user behind a shared carrier-grade NAT address,
+refused for something a neighbour did, is told to wait without being told how
+long — and the Bulgarian says "you made too many attempts", in the active
+voice, so it also tells them they did it. I argued for an agentless passive,
+which is accurate for every reader; the product owner chose the warmer
+sentence over the strictly truthful one, which is a legitimate call on copy
+nobody reads twice. The comment beside the string records the trade, so the
+first complaint from an innocent user has somewhere to land.
 
 ### Q: Where does the action list keep its filter state? **[WARM]**
 
