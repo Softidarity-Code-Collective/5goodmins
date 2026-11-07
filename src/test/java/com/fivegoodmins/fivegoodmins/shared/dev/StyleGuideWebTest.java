@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * The living style guide (frontend brief, section 8), and through it the four
- * pieces of layout wiring a frontend contributor inherits rather than writes:
+ * pieces of layout wiring Geri inherits rather than writes:
  * the taxonomy on the model, the skip link, the stylesheet and script tags,
  * and the CSRF token on htmx requests.
  *
@@ -76,8 +76,8 @@ class StyleGuideWebTest {
 
     @Test
     void servesTheStyleGuideToAnAnonymousVisitor() throws Exception {
-        // No login. A style guide behind authentication is a style guide the
-        // contributor cannot open on the morning they start.
+        // No login. A style guide behind authentication is a style guide
+        // Geri cannot open on the morning she starts.
         mockMvc.perform(get(STYLE_GUIDE)).andExpect(status().isOk());
     }
 

@@ -189,7 +189,7 @@ class ErrorPagesTest {
         // A POST with no token is the realistic way to reach 403 anonymously,
         // and it is the failure an htmx request makes when the layout stops
         // sending the header -- so this is the page that would greet the
-        // frontend contributor on the day that breaks.
+        // Geri on the day that breaks.
         HttpResponse<String> response = send(HttpRequest.newBuilder(url("/dev/styleguide/htmx-check"))
                 .POST(HttpRequest.BodyPublishers.noBody()));
 
