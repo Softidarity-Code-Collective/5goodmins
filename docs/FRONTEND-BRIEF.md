@@ -1,8 +1,8 @@
 # Frontend Brief — 5 Good Minutes (5goodmins.com)
 
-For the frontend contributor. Read alongside `ARCHITECTURE.md`; where the two
+For Geri. Read alongside `ARCHITECTURE.md`; where the two
 disagree, `ARCHITECTURE.md` wins and this file gets corrected. Last reconciled
-against ARCHITECTURE.md Rev 28 (2026-11-05): **the repository is now set up for
+against ARCHITECTURE.md Rev 31 (2026-11-06): **the repository is now set up for
 you to start.** One Compose command runs everything, templates and CSS reload
 on save, the static asset paths exist and are served, htmx is vendored and
 wired to the CSRF token, the Content-Security-Policy is decided (section 1 —
@@ -512,7 +512,7 @@ against the short ones.
 
 ## 8. Ways of working — your call
 
-These are the contributor's decisions, with context rather than instructions.
+These are Geri's decisions, with context rather than instructions.
 
 **Templates or mockups.** Either deliver Thymeleaf templates directly, or
 deliver flat HTML/CSS that Georgi converts. Direct templates avoid a

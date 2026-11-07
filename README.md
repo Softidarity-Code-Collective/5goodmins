@@ -51,7 +51,7 @@ Next, in order:
 
 - Page 1 proper: filters, search, paging and the htmx swapping, over the
   placeholder listing that is there now
-- Templates and the design system (a frontend contributor — see
+- Templates and the design system (Geri — see
   `docs/FRONTEND-BRIEF.md`)
 - Subscriptions and preferences, then the daily digest email and unsubscribe
 - Submitting actions and the admin approval queue
