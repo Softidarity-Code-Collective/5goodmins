@@ -1054,6 +1054,89 @@ making two attempts a minute. Nothing per-IP does. The honest answer to that is
 Cloudflare Turnstile on the form, which is the next step I would take and have
 not taken.
 
+### Q: What does a rate-limited user actually see? **[WARM]**
+
+A real page in the site layout, and it tells them less than it could.
+
+The filter refuses by calling `sendError(429)` rather than writing a body,
+which routes the refusal through the servlet error dispatch and lands it on
+`templates/error/429.html` like any other error page. That was the point of
+doing it that way: writing the body in the filter would mean a user-facing
+string in Java, which this project forbids (ADR-008), or a blank page, which
+tells a human nothing.
+
+The copy says what happened, that it is temporary, and to come back later. It
+names **no interval**, and the reason is security: a number on the page states
+the shape of the bucket, which is the one thing about this mechanism an
+attacker cannot already measure cheaply. They know they were refused; they do
+not learn whether to come back in a minute or an hour. One template also
+serves two windows — fifteen minutes for login, an hour for registration — so
+there is no single number that would be true anyway.
+
+**The part I would volunteer, because it is where I was wrong.** I first
+defended this as a technical limitation: the template "cannot" read the
+`Retry-After` back. That is false. Boot's error model is right there on the
+page — `${timestamp}`, `${status}`, `${error}`, `${path}` — and I only know it
+is because I rendered `${status}` and `${path}` into the 429 template and read
+`429` and `/register` back off the socket. Exposing the window would take a
+custom `ErrorAttributes`; it is declined, not impossible. And that same probe
+explains why no page in that directory prints `${path}`: it is whatever URL the
+visitor asked for, so printing it is reflected XSS on the one page nobody
+tests. Leaning on the technical claim made the weaker argument *and* the more
+fragile one, because the security reason stands perfectly well alone.
+
+The cost is real and I would state it in a review, and it got slightly worse
+on purpose. A legitimate user behind a shared carrier-grade NAT address,
+refused for something a neighbour did, is told to wait without being told how
+long — and the Bulgarian says "you made too many attempts", in the active
+voice, so it also tells them they did it. I argued for an agentless passive,
+which is accurate for every reader, and then chose the warmer sentence
+anyway: **both hats are mine on this project**, which is exactly why the
+trade is written in a comment beside the string rather than left in my head.
+Overruling yourself is the easiest decision on a solo project to lose track
+of, and the first complaint from an innocent user now has somewhere to land.
+
+### Q: Where does the action list keep its filter state? **[WARM]**
+
+In the URL, and that is the decision the rest of page 1 falls out of
+(ADR-022). `GET /actions?category=HUMAN_RIGHTS&region=SOFIA_CITY&q=...&page=2`
+— `SOFIA_CITY`, not `SOFIA`, and the distinction is the sort of thing worth
+being exact about in an interview: the enum has `SOFIA_CITY` and
+`SOFIA_PROVINCE` because the city and the province around it are different
+places to organise in, and an invented constant in a URL would be dropped
+silently by the rule two paragraphs down.
+Not the session, not a POST body, not a cookie.
+
+The product reason is that a filtered list is a thing people send each other
+— "all the environmental petitions in Plovdiv" is a link in a group chat, and
+a directory whose filters live in my session cannot produce that link. The
+technical dividends are free rather than designed: the back button works
+because every filter change is a history entry, two tabs with two filter sets
+do not fight over one server-side value, an anonymous visitor needs no session
+to use the main page, and the language switcher already round-trips the whole
+query string, so a filtered list survives switching to English without a line
+of new code. Filter state in a POST body is the version that would have broken
+that last one.
+
+The part I would raise before being asked: it means the same route serves two
+things, a full page and an htmx fragment, branching on the `HX-Request`
+header. I chose that over a second `/actions/results` path so the URL htmx
+fetches and the URL pushed into the address bar are the same string — one
+place building the query, and a pushed URL that still works when pasted into a
+fresh tab.
+
+**The risk that creates is a cache serving a fragment to a browser that asked
+for the page, and I had the mechanism wrong at first.** I wrote that
+`Vary: HX-Request` is what prevents it. It is not — Cloudflare does not vary
+on a custom request header unless you configure it to in Cache Rules, so that
+header was protecting nothing. What actually holds is that Cloudflare does not
+cache HTML by default and every response already carries
+`Cache-Control: no-store` from Spring Security's default headers. The `Vary`
+stays because it is the correct description of the response for any cache that
+does honour it, but it is honesty rather than the mechanism. If I ever put HTML
+behind an edge cache, `no-store` is the first thing to check and `Vary` is not
+a substitute for it.
+
 ### Q: Why two buckets on registration? **[DEEP]**
 
 Because they defend different things, and only one of them defends *me*.
