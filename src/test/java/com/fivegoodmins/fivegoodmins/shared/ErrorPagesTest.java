@@ -110,8 +110,9 @@ class ErrorPagesTest {
     }
 
     /**
-     * The fallback, {@code error/error.html}, which is what every status
-     * without a page of its own resolves to.
+     * The fallback, {@code templates/error.html}, which is what every status
+     * without a page of its own resolves to. Not {@code error/error.html} --
+     * that path is the mistake this test caught, and Boot never consults it.
      *
      * <p>It is worth a test because the gap it closed was invisible: four
      * named pages existed, so the directory looked finished, while a 405 from

@@ -120,6 +120,12 @@ freely.
   sidebar is checkboxes rather than dropdowns and the active-filter summary
   can hold a dozen chips; and **pagination is numbered pages**, so the
   pagination fragment is page numbers rather than a "load more" button.
+- **`/` does not work yet, and it is the first thing you will type.** There is
+  no mapping for the root, so an anonymous visit to the domain lands on the
+  login form. ADR-022 decides the answer — a `302` to `/actions`, plus `/`
+  added to the permitted paths in `SecurityConfig`, because without that half
+  the redirect never runs — and both arrive with the listing controller. Until
+  then, go to `/actions` directly.
 - **Images.** ADR-006 settled on storage in Postgres served through a
   controller, but neither the table nor the upload exists yet. Section 7's
   default — text-only cards, one featured action with an image — is what to
