@@ -1090,10 +1090,11 @@ on purpose. A legitimate user behind a shared carrier-grade NAT address,
 refused for something a neighbour did, is told to wait without being told how
 long — and the Bulgarian says "you made too many attempts", in the active
 voice, so it also tells them they did it. I argued for an agentless passive,
-which is accurate for every reader; the product owner chose the warmer
-sentence over the strictly truthful one, which is a legitimate call on copy
-nobody reads twice. The comment beside the string records the trade, so the
-first complaint from an innocent user has somewhere to land.
+which is accurate for every reader, and then chose the warmer sentence
+anyway: **both hats are mine on this project**, which is exactly why the
+trade is written in a comment beside the string rather than left in my head.
+Overruling yourself is the easiest decision on a solo project to lose track
+of, and the first complaint from an innocent user now has somewhere to land.
 
 ### Q: Where does the action list keep its filter state? **[WARM]**
 
