@@ -110,3 +110,5 @@ If I ask for one of these, push back and name it as v2 before writing anything.
   (`STARA_ZAGORA`, `HUMAN_RIGHTS`); display text lives in the message bundles.
 - **Never edit an applied Flyway migration.** `V1__` is editable only while it
   has run nowhere but my laptop; once Railway has it, changes are a new file.
+
+  Test commit after Railway reintegration
