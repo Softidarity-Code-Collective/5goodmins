@@ -123,7 +123,7 @@ class RateLimitHttpTest {
 
         assertThat(refused.statusCode()).isEqualTo(429);
         // The page's own text, from the bundle...
-        assertThat(refused.body()).contains("Прекалено много опити");
+        assertThat(refused.body()).contains("Твърде много опити");
         // ...inside the layout, which is the half that distinguishes this from
         // the whitelabel page this refusal rendered until the template existed.
         assertThat(refused.body()).contains("5 Good Minutes", "id=\"main\"");
