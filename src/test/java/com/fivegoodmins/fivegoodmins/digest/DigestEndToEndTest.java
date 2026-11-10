@@ -207,8 +207,12 @@ class DigestEndToEndTest {
         EmailMessage digest = digestTo("e2e-reader@seed.example");
 
         // The subject carries the count, so a month of digests does not thread
-        // together in Gmail.
-        assertThat(digest.subject()).contains("1").contains("нови действия");
+        // together in Gmail -- and with ONE action it has to say so in
+        // Bulgarian. The assertion this replaced was
+        // contains("1").contains("нови действия"), which is exactly the
+        // assertion that passes on "1 нови действия": it checked that both
+        // halves were present and never that they agreed.
+        assertThat(digest.subject()).isEqualTo("1 ново действие за вас");
 
         // Both bodies, every time: a client that renders only text otherwise
         // shows nothing, and HTML-only mail scores worse with spam filters --
@@ -222,6 +226,43 @@ class DigestEndToEndTest {
                 .contains("Спаси гората над Варна")
                 .contains("Природа")
                 .contains("Варна");
+    }
+
+    @Test
+    void agreesInNumberForASingleActionDigest() {
+        publish("Спаси гората над Варна", Set.of(Category.NATURE), Set.of(Region.VARNA));
+
+        digests.sendDailyDigest();
+        EmailMessage digest = digestTo(reader.getEmail());
+
+        // One action, singular everywhere: the subject, and the intro's noun
+        // AND its relative clause and verb, which Bulgarian inflects together
+        // ("което отговаря", not "които отговарят"). A plural-only string would
+        // read "1 нови действия, които отговарят" -- wrong three times in one
+        // sentence, in the commonest digest there is.
+        assertThat(digest.subject()).isEqualTo("1 ново действие за вас");
+        assertThat(digest.html())
+                .contains("1 ново действие, което отговаря")
+                .doesNotContain("нови действия");
+        assertThat(digest.text())
+                .contains("1 ново действие, което отговаря")
+                .doesNotContain("нови действия");
+    }
+
+    @Test
+    void agreesInNumberForAMultipleActionDigest() {
+        publish("Спаси гората над Варна", Set.of(Category.NATURE), Set.of(Region.VARNA));
+        publish("Безопасни пътеки в Пловдив", Set.of(Category.CHILDREN), Set.of(Region.PLOVDIV));
+
+        digests.sendDailyDigest();
+        EmailMessage digest = digestTo(reader.getEmail());
+
+        // The other branch of the same choice, so the test pins both and not
+        // whichever one the fixture happened to produce.
+        assertThat(digest.subject()).isEqualTo("2 нови действия за вас");
+        assertThat(digest.html())
+                .contains("2 нови действия, които отговарят")
+                .doesNotContain("ново действие");
     }
 
     @Test

@@ -61,15 +61,61 @@ class SubscriptionServiceTest {
             return new SignedTokenProperties("test-only-signing-key-at-least-32-characters");
         }
 
+        /**
+         * Movable rather than fixed, which is what lets the expired-token test
+         * below exist at all: an {@code UNSUBSCRIBE} token is signed for ten
+         * years, so the only way to see {@link SignedTokenService} report it
+         * expired is to move the clock past that. ADR-019 names this technique
+         * directly -- "a fixed Clock proves a boundary, a mutable one proves a
+         * sequence".
+         */
         @Bean
-        java.time.Clock clock() {
-            return java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC);
+        MovableClock clock() {
+            return new MovableClock(NOW);
+        }
+    }
+
+    /**
+     * A {@link java.time.Clock} a test can move.
+     *
+     * <p>{@code SignedTokenServiceTest} has an equivalent of its own and the two
+     * are deliberately not shared: it is twelve lines of trivial code, and one
+     * shared test fixture reaching across two feature packages is a heavier
+     * thing to own than the duplication. If a third test wants one, extract it
+     * then.
+     */
+    static final class MovableClock extends java.time.Clock {
+
+        private volatile Instant instant;
+
+        private MovableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        void moveTo(Instant later) {
+            this.instant = later;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
+
+        @Override
+        public java.time.ZoneId getZone() {
+            return java.time.ZoneOffset.UTC;
+        }
+
+        @Override
+        public java.time.Clock withZone(java.time.ZoneId zone) {
+            return this;
         }
     }
 
     @Autowired SubscriptionService subscriptions;
     @Autowired AppUserRepository users;
     @Autowired SignedTokenService tokens;
+    @Autowired MovableClock clock;
     @Autowired EntityManager em;
 
     private AppUser reader;
@@ -239,6 +285,36 @@ class SubscriptionServiceTest {
         em.clear();
 
         assertThat(subscriptions.preferencesOf(reader.getId()).digestEnabled()).isFalse();
+    }
+
+    @Test
+    void unsubscribesWithAnExpiredToken() {
+        String token = subscriptions.unsubscribeToken(reader.getId());
+
+        // Eleven years on, past the ten-year UNSUBSCRIBE lifetime.
+        clock.moveTo(NOW.plus(java.time.Duration.ofDays(11 * 365)));
+
+        // Deliberately honoured rather than refused, and this is the test that
+        // keeps the branch from being "simplified" away. The signature is
+        // checked before the expiry is read, so the id on an Expired token is
+        // as authentic as the id on a Valid one -- and refusing it would mean
+        // telling somebody holding a genuine, this-application-signed opt-out
+        // link that they cannot opt out. That is the one answer a legally
+        // required mechanism must not give.
+        assertThat(subscriptions.unsubscribe(token)).isTrue();
+        em.flush();
+        em.clear();
+
+        assertThat(subscriptions.preferencesOf(reader.getId()).digestEnabled()).isFalse();
+    }
+
+    @Test
+    void stillRefusesAnExpiredTokenThatDoesNotVerify() {
+        clock.moveTo(NOW.plus(java.time.Duration.ofDays(11 * 365)));
+
+        // Expiry is forgiven; a bad signature is not. Otherwise "we honour
+        // expired tokens" would quietly mean "we honour anything old".
+        assertThat(subscriptions.unsubscribe("1.9999999999.not-a-real-mac")).isFalse();
     }
 
     @Test

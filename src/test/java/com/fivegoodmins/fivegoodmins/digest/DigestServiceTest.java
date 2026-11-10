@@ -216,6 +216,39 @@ class DigestServiceTest {
     }
 
     @Test
+    void reportsADeliveredDigestAsSentEvenIfTheWatermarkAdvanceThrows() {
+        given(List.of(subscriber(7, "bg")));
+        withSomethingNew();
+        when(subscribers.advanceWatermark(anyLong(), any()))
+                .thenThrow(new IllegalStateException("the database went away mid-run"));
+
+        DigestRun run = service.sendDailyDigest();
+
+        // The email left. Counting this FAILED would have DigestRun describing
+        // the opposite of what happened -- and `failed` is the one number an
+        // operator watches. The duplicate that is now queued for tomorrow is a
+        // log line, not a count: see DigestService.advanceWatermark.
+        verify(sender).send(any());
+        assertThat(run).isEqualTo(new DigestRun(1, 1, 0, 0));
+    }
+
+    @Test
+    void doesNotLetOneSubscribersWatermarkFailureCostAnotherTheirDigest() {
+        given(List.of(subscriber(1, "bg"), subscriber(2, "bg")));
+        withSomethingNew();
+        when(subscribers.advanceWatermark(eq(1L), any()))
+                .thenThrow(new IllegalStateException("one bad row"));
+        when(subscribers.advanceWatermark(eq(2L), any())).thenReturn(1);
+
+        DigestRun run = service.sendDailyDigest();
+
+        // Both emails go out and the second watermark still moves, because the
+        // advance is caught per subscriber rather than ending the run.
+        assertThat(run).isEqualTo(new DigestRun(2, 2, 0, 0));
+        verify(subscribers).advanceWatermark(2L, CUTOFF);
+    }
+
+    @Test
     void survivesAFailureInTheQueryAsWellAsInTheSend() {
         given(List.of(subscriber(1, "bg"), subscriber(2, "bg")));
         when(digests.digestFor(any(), any(), any(), any()))
@@ -299,9 +332,29 @@ class DigestServiceTest {
 
         // A varying subject, so a month of daily digests does not collapse into
         // one threaded conversation in Gmail with yesterday's still unread.
+        // The count is passed as a Number rather than a String because the
+        // bundle resolves it through a MessageFormat choice -- "1 ново
+        // действие" against "3 нови действия" -- and choice needs a number.
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
         verify(composer).compose(anyString(), any(), any(), any(), arguments.capture());
         assertThat(arguments.getValue()).containsExactly(3);
+        assertThat(arguments.getValue()[0]).isInstanceOf(Number.class);
+    }
+
+    @Test
+    void passesOneAsANumberForASingleActionDigest() {
+        given(List.of(subscriber(1, "bg")));
+        withSomethingNew();
+
+        service.sendDailyDigest();
+
+        // One action is the commonest digest this site will ever send, and it is
+        // the case the subject's plural has to get right. The grammar itself is
+        // asserted against the real bundles in DigestEndToEndTest; what this
+        // pins is that the service hands the count over at all.
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(composer).compose(anyString(), any(), any(), any(), arguments.capture());
+        assertThat(arguments.getValue()).containsExactly(1);
     }
 
     /**

@@ -54,11 +54,19 @@ import java.util.Map;
  * watching a scheduled job with a stopwatch.
  *
  * <p><strong>One subscriber's failure does not end the run.</strong> Each is
- * sent inside its own try/catch, so a single bad address or one rejected
+ * handled inside its own try/catch, so a single bad address or one rejected
  * request costs that person a day and nobody else anything. The alternative --
  * letting it propagate -- would mean the first failure silently cancelled every
  * subscriber after it in id order, which is both the wrong outcome and an
  * unfair one.
+ *
+ * <p><strong>And it is three catches per subscriber, not one.</strong> The
+ * query, the send and the watermark advance fail in different ways and mean
+ * different things: before the send there is nothing to undo, after it there is
+ * nothing that can be undone. A single {@code try} around all three would
+ * report a delivered digest as {@code FAILED} whenever the advance threw --
+ * and leave the watermark behind, which is this feature's original bug wearing
+ * a different hat. See {@link #sendTo}.
  *
  * <p><strong>Not {@code @Transactional}, anywhere in this class, and that is
  * load-bearing.</strong> A transaction around the run would hold one open
@@ -177,36 +185,79 @@ public class DigestService {
     /**
      * One subscriber. Never throws: the outcome is the return value, so the run
      * continues.
+     *
+     * <p><strong>Three phases, three catches, and the split is the point.</strong>
+     * One {@code try} spanning the query, the send and the watermark advance
+     * looks tidier and reintroduces the bug this feature already shipped once:
+     * if the advance fails <em>after</em> a successful send, a single catch
+     * records {@code FAILED}, the watermark stays put, and tomorrow mails the
+     * same digest again. The email is already gone at that point -- nothing
+     * downstream can un-send it -- so the outcome is {@code SENT} and the
+     * watermark failure gets a log line that says what it actually means.
+     *
+     * <p>Which also makes the counts honest. Reporting {@code FAILED} for a
+     * digest that was delivered would have {@code DigestRun} describing the
+     * opposite of what happened, and the one number an operator watches is
+     * {@code failed}.
      */
     private Outcome sendTo(DigestSubscriber subscriber, Instant cutoff, Instant now) {
+        List<DigestAction> actions;
         try {
-            List<DigestAction> actions = digests.digestFor(
+            actions = digests.digestFor(
                     subscriber.watermark(), cutoff, now,
                     // The one place "an empty selection means everything" is
                     // decided lives in subscription/, and the digest asks for
                     // it rather than reimplementing it in the query that
                     // matters most (ADR-023).
                     subscriptions.effectiveFilterFor(subscriber.id()));
+        } catch (RuntimeException failed) {
+            // Nothing was sent, so nothing has to be undone and the watermark
+            // is untouched by construction.
+            log.error("failed to build the daily digest for account {}", subscriber.id(), failed);
+            return Outcome.FAILED;
+        }
 
-            if (actions.isEmpty()) {
-                // No email, and -- deliberately -- no watermark advance either.
-                // ADR-005's loop only moves it on a send, and leaving it put is
-                // what lets somebody who later follows another category
-                // receive the actions published in the meantime rather than
-                // having been silently stepped over. The cost is that an
-                // inactive subscriber's query range grows: it is
-                // "everything published since their last actual digest", which
-                // at this catalogue size is nothing, and which the partial
-                // index on (published_at desc, id desc) answers as a range
-                // scan. Recorded in ADR-005's open points as the thing to
-                // revisit if the catalogue ever outgrows it.
-                return Outcome.NOTHING_NEW;
-            }
+        if (actions.isEmpty()) {
+            // No email, and -- deliberately -- no watermark advance either.
+            // ADR-005's loop only moves it on a send, and leaving it put is
+            // what lets somebody who later follows another category receive
+            // the actions published in the meantime rather than having been
+            // silently stepped over. The cost is that an inactive
+            // subscriber's query range grows: it is "everything published
+            // since their last actual digest", which at this catalogue size
+            // is nothing, and which the partial index on
+            // (published_at desc, id desc) answers as a range scan. Recorded
+            // in ADR-005's open points as the thing to revisit if the
+            // catalogue ever outgrows it.
+            return Outcome.NOTHING_NEW;
+        }
 
+        try {
             sender.send(compose(subscriber, actions));
+        } catch (RuntimeException failed) {
+            // The address is never logged -- the id is (ADR-005). The watermark
+            // is untouched, so tomorrow's run carries today's actions as well,
+            // which is the whole reason the advance comes after the send.
+            log.error("failed to send the daily digest to account {}", subscriber.id(), failed);
+            return Outcome.FAILED;
+        }
 
-            int moved = subscribers.advanceWatermark(subscriber.id(), cutoff);
-            if (moved == 0) {
+        advanceWatermark(subscriber, cutoff);
+        return Outcome.SENT;
+    }
+
+    /**
+     * Moves the watermark after a send that has already succeeded, and absorbs
+     * its own failures.
+     *
+     * <p>Separate from the send, and never able to change the outcome: by the
+     * time this runs the email has left, so the only question left is whether
+     * tomorrow repeats it. Both ways that can go wrong are logged with what
+     * they mean rather than with what threw.
+     */
+    private void advanceWatermark(DigestSubscriber subscriber, Instant cutoff) {
+        try {
+            if (subscribers.advanceWatermark(subscriber.id(), cutoff) == 0) {
                 // The guarded update declined: this subscriber's watermark is
                 // already at or past the cutoff, which means another process
                 // did this night's work for them. Not an error -- the email
@@ -217,12 +268,15 @@ public class DigestService {
                 log.warn("watermark for account {} was already at or past the cutoff; "
                         + "a concurrent run is the likely cause", subscriber.id());
             }
-            return Outcome.SENT;
         } catch (RuntimeException failed) {
-            // The address is never logged -- the id is (ADR-005). The watermark
-            // is untouched, so tomorrow's run carries today's actions as well.
-            log.error("failed to send the daily digest to account {}", subscriber.id(), failed);
-            return Outcome.FAILED;
+            // The expensive one, and the reason this catch exists at all: the
+            // digest HAS been delivered and the watermark has not moved, so
+            // tomorrow's run will mail the same actions to the same person.
+            // That is a duplicate rather than a gap, it is not visible as a
+            // failed send, and this is the only line that will say so.
+            log.error("the daily digest was delivered to account {} but its watermark did not move; "
+                    + "this account will be mailed the same actions again on the next run",
+                    subscriber.id(), failed);
         }
     }
 

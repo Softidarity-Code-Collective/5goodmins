@@ -32,6 +32,25 @@ import java.util.Set;
  * second query would arrive with no badges at all and render an entry with
  * empty tag lists -- rare, nightly, and exactly the kind of defect nobody can
  * reproduce.
+ *
+ * <p><strong>{@link #digestFor} is {@code public} on a package-private class,
+ * which is not an oversight.</strong> It was package-private, and that made the
+ * paragraph above a claim resting on undocumented behaviour: Spring's
+ * proxy-based AOP advises a non-public method only under class-based (CGLIB)
+ * proxies, which is Boot's default and does work, but it is not what the
+ * reference documentation promises and it reverts silently if anybody sets
+ * {@code spring.aop.proxy-target-class=false}. A transaction boundary that
+ * exists by accident of a default is the same species of bug as the missing
+ * {@code @Transactional} on {@code advanceWatermark} that this feature already
+ * shipped once -- so it is {@code public}, which costs no encapsulation at all
+ * because the class itself is package-private and nothing outside
+ * {@code digest/} can name the type.
+ *
+ * <p>And the claim is now tested rather than asserted:
+ * {@code DigestQueriesTransactionTest} reads
+ * {@code TransactionSynchronizationManager.getCurrentTransactionName()} from
+ * inside each of the three repository calls and requires all three to name
+ * <em>this</em> method, which is what "the same snapshot" means operationally.
  */
 @Service
 class DigestQueries {
@@ -57,7 +76,8 @@ class DigestQueries {
      *         {@link DigestService} uses to send nothing at all.
      */
     @Transactional(readOnly = true)
-    List<DigestAction> digestFor(Instant watermark, Instant cutoff, Instant now, SubscriptionFilter filter) {
+    public List<DigestAction> digestFor(Instant watermark, Instant cutoff, Instant now,
+                                       SubscriptionFilter filter) {
         List<DigestActionRow> rows = actions.findMatching(
                 watermark, cutoff, now,
                 filter.categories(), filter.regions(),

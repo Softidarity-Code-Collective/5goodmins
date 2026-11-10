@@ -42,12 +42,20 @@
   Model: displayName, actions (DigestAction: id, title, actionType, excerpt,
   categories, regions), actionsUrl, unsubscribeUrl. siteUrl comes from the
   composer; the subject takes the action count as its one argument.
+
+  The preheader deliberately takes NO argument, though it once did. A key
+  resolved WITH arguments goes through MessageFormat; a key resolved without
+  them does not (AbstractMessageSource, alwaysUseMessageFormat defaults false).
+  So passing an argument a string has no placeholder for changes nothing today
+  and quietly arms a trap: the first apostrophe anybody writes in that Bulgarian
+  sentence would be eaten as MessageFormat quoting rather than printed. The
+  count is already in the subject, which is the line that needs it.
 */-->
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org"
       th:replace="~{email/layout :: page(
                       #{email.digest.subject(${#lists.size(actions)})},
-                      #{email.digest.preheader(${#lists.size(actions)})},
+                      #{email.digest.preheader},
                       ~{:: #content})}">
 <body>
 <div id="content"

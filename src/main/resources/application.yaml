@@ -173,6 +173,28 @@ spring:
     properties:
       hibernate.jdbc.time_zone: UTC
 
+      # Pad IN-clause parameter lists to the next power of two, so a query
+      # whose list length varies does not fragment the plan cache.
+      #
+      # Added for the digest (ADR-005, ADR-023), which is the first query here
+      # with a genuinely variable IN list and the one that runs per subscriber:
+      # it binds the categories and regions a reader follows, which is anything
+      # from one to ten and one to thirty -- and ten and thirty exactly for
+      # every account that has never opened the preferences page, since an empty
+      # selection expands to the whole vocabulary. Without padding that is up to
+      # forty distinct query shapes for one piece of SQL, each planned and cached
+      # separately; with it, six.
+      #
+      # Measured as off by default rather than assumed: the generated SQL showed
+      # `in (?,?,?,?,?,?,?,?,?,?)` for ten categories, which padding would have
+      # rendered as sixteen placeholders.
+      #
+      # The cost is a few bound parameters repeating the last value, which
+      # Postgres evaluates and discards. Global rather than per-query because
+      # there is no query here it harms, and a Hibernate setting applied in one
+      # place is one a reader can find.
+      hibernate.query.in_clause_parameter_padding: true
+
   # No spring.messages.* here: shared/MessageSourceConfig declares the
   # MessageSource itself, which makes Boot's auto-configuration back off and
   # these properties inert. See that class for why it has to.
