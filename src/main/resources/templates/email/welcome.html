@@ -13,10 +13,15 @@
   welcome email it would be an invitation to opt out of the thing they have just
   opted into, one line below the reason they opted in.
 
-  Also no promise of a daily digest, which is the sentence this email most
-  obviously wants. The digest job is not built yet, and a welcome email that
-  says "you will now receive a daily digest" is a lie in somebody's inbox until
-  it is. The line goes in with the job.
+  It DOES promise the daily digest, and that line arrived with the job rather
+  than with this template. Until DigestJob existed, "you will now receive a
+  daily digest" was a lie in somebody's inbox, so the sentence was deliberately
+  absent; it is true now. It is deliberately not a second link: the preferences
+  page is behind a login and a just-confirmed reader is usually not signed in,
+  so the call to action below stays this email's only link. What the sentence
+  does say is that the digest can be narrowed or stopped, because the first
+  thing a new subscriber needs to know about a daily email is that they are in
+  control of it.
 
   Model: displayName, actions (ActionSummary: id, title, actionType, excerpt),
   actionsUrl. siteUrl comes from the composer.
@@ -33,8 +38,12 @@
     <p class="text" style="margin:16px 0 12px 0; color:#172424;"
        th:text="#{email.welcome.greeting(${displayName})}">Hello,</p>
 
-    <p class="text" style="margin:0 0 24px 0; color:#172424;"
+    <p class="text" style="margin:0 0 12px 0; color:#172424;"
        th:text="#{email.welcome.intro}">Your address is confirmed.</p>
+
+    <!--/* The digest promise. True since DigestJob landed, and not before. */-->
+    <p class="text" style="margin:0 0 24px 0; color:#172424;"
+       th:text="#{email.welcome.digest}">You will get a daily digest.</p>
 
     <p class="text" style="margin:0 0 12px 0; font-weight:700; color:#172424;"
        th:if="${not #lists.isEmpty(actions)}"

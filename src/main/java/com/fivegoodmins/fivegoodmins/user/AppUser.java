@@ -1,10 +1,14 @@
 package com.fivegoodmins.fivegoodmins.user;
 
+import com.fivegoodmins.fivegoodmins.action.Category;
+import com.fivegoodmins.fivegoodmins.action.Region;
 import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 import java.time.Instant;
+import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Set;
 
 @Entity
 @Table(name = "app_user")
@@ -49,8 +53,58 @@ public class AppUser {
     @Column(name = "last_digest_sent_at", nullable = false)
     private Instant lastDigestSentAt;
 
+    @Column(name = "digest_enabled", nullable = false)
+    private boolean digestEnabled = true;
+    // Defaults to true in the field as well as in the migration, and the two
+    // are not redundant: the column default covers rows written by SQL, this
+    // covers rows Hibernate inserts -- which is every registration, because
+    // Hibernate names every mapped column in its INSERT and would otherwise
+    // send false. A new account must be subscribed (ADR-023).
+
     @Column(nullable = false, length = 2)
     private String locale = "bg";
+
+    // -----------------------------------------------------------------------
+    // What this user follows (ADR-023). Two element collections on an entity
+    // in user/, for a feature that lives in subscription/ -- which is a bent
+    // package boundary and a deliberate one.
+    //
+    // JPA requires the entity owning an @ElementCollection to be the one whose
+    // primary key the collection table references, and both tables are keyed
+    // on app_user.id. The alternative was a `subscription` row per user to own
+    // them, rejected in ADR-023 because that row would not exist until someone
+    // visited the preferences page, which puts "what does an absent row mean?"
+    // into the nightly job's subscriber query. Everything else about these two
+    // sets -- the defaulting, the preferences page, the matching rule -- is in
+    // subscription/ and digest/.
+    //
+    // LAZY, and nothing on a request path may touch them. AppUserDetailsService
+    // loads this entity on every authenticated request, with
+    // open-in-view=false: a template reaching for these would throw
+    // LazyInitializationException, which is the point (ADR-013). The digest
+    // does not load this entity at all -- it reads projections -- and the
+    // preferences page loads them inside its transaction.
+    //
+    // An EMPTY SET MEANS EVERY VALUE, not none (ADR-023). That substitution
+    // happens in SubscriptionService, not here: an accessor that returned the
+    // whole enum for an empty collection would be a getter that lies about the
+    // rows, and the preferences page needs the real selection in order to tick
+    // the right boxes.
+    // -----------------------------------------------------------------------
+
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "subscription_category",
+            joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "category", nullable = false, length = 30)
+    @Enumerated(EnumType.STRING)
+    private Set<Category> subscribedCategories = new LinkedHashSet<>();
+
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "subscription_region",
+            joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "region", nullable = false, length = 30)
+    @Enumerated(EnumType.STRING)
+    private Set<Region> subscribedRegions = new LinkedHashSet<>();
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
@@ -208,6 +262,52 @@ public class AppUser {
 
     public void setLastDigestSentAt(Instant lastDigestSentAt) {
         this.lastDigestSentAt = lastDigestSentAt;
+    }
+
+    public boolean isDigestEnabled() {
+        return digestEnabled;
+    }
+
+    /**
+     * The preferences page writes this, and so does the unsubscribe link --
+     * which is the only one of the two that works without logging in
+     * (ADR-005).
+     *
+     * <p>A plain setter rather than {@code subscribe()} / {@code unsubscribe()}
+     * named methods, unlike {@link com.fivegoodmins.fivegoodmins.action.Action}'s
+     * lifecycle. The rule in those is that {@code published_at} must be
+     * written exactly once ever, because the digest watermark treats it as
+     * immutable, so a setter would make the pattern unsound. Nothing of that
+     * kind is true here: this is a boolean a user may flip as often as they
+     * like, in both directions, and {@code setEnabled} and {@code setLocale}
+     * next to it are the same shape for the same reason.
+     *
+     * <p>The watermark itself is the field on this entity that does carry an
+     * invariant, and it is deliberately not written through
+     * {@link #setLastDigestSentAt} by the digest -- see
+     * {@code DigestSubscriberRepository.advanceWatermark}, which moves it in
+     * one guarded statement so that it can only ever go forward.
+     */
+    public void setDigestEnabled(boolean digestEnabled) {
+        this.digestEnabled = digestEnabled;
+    }
+
+    /**
+     * The categories this user follows, as stored. Possibly empty, which means
+     * every category rather than none -- {@code SubscriptionService} is where
+     * that substitution happens, because the preferences page needs the real
+     * selection and the digest needs the effective one (ADR-023).
+     *
+     * <p>Mutable, and the preferences page replaces its contents rather than
+     * assigning a new set, so Hibernate tracks the collection it created.
+     */
+    public Set<Category> getSubscribedCategories() {
+        return subscribedCategories;
+    }
+
+    /** See {@link #getSubscribedCategories()}. */
+    public Set<Region> getSubscribedRegions() {
+        return subscribedRegions;
     }
 
     public String getLocale() {

@@ -53,8 +53,10 @@ Next, in order:
   placeholder listing that is there now
 - Templates and the design system (Geri — see
   `docs/FRONTEND-BRIEF.md`)
-- Subscriptions and preferences, then the daily digest email and unsubscribe
 - Submitting actions and the admin approval queue
+- Page 2, the action detail page — which is also what the digest and the welcome
+  email are waiting for: both list actions as plain text today, because there is
+  nowhere for a per-action link to point
 
 ---
 
@@ -136,25 +138,68 @@ exist in an in-memory database. One container is started for the whole suite.
 
 ## Scheduled jobs
 
-`@Scheduled` runs in the application process (`shared/SchedulingConfig`). Today
-there is one job: the nightly purge of accounts that never confirmed their
-address, at 03:30 UTC. The daily digest joins it.
+`@Scheduled` runs in the application process (`shared/SchedulingConfig`). There
+are two jobs:
 
-**Known constraint: this assumes exactly one instance is running.** The
-scheduler knows nothing about its peers, so a second replica runs every job a
-second time — harmless for the purge, but two digest emails per subscriber. It
-is the single thing in this design that blocks horizontal scaling, and it is
-accepted knowingly for the MVP. The fix when it matters is ShedLock or a
-PostgreSQL advisory lock around each job, or moving the scheduled work to a
-separate single-replica deployment.
+| Job | When | Locked? |
+|---|---|---|
+| Purge of accounts that never confirmed their address | 03:30 **UTC** | No — it does not need to be |
+| Daily digest | 07:00 **Europe/Sofia** | Yes |
 
-**That assumption is false during a deploy.** Railway starts the new container,
-waits for its health check, and only then drains the old one — so two processes
-briefly run the same schedule, on every deploy rather than only when someone
-scales up. **Do not deploy within a few minutes of 03:00 or 03:30 UTC.** The
-purge tolerates it (running it twice deletes nothing the first pass left); the
-daily digest will not, so the lock above stops being optional on the day the
-digest ships.
+The two zones are a decision, not an inconsistency. The purge has no deadline —
+a row deleted at seven days or at eight is the same row — so it runs at a fixed
+UTC hour. The digest is timed for a reader's morning, so it is pinned to the
+readers' zone; on UTC it would drift between 07:00 and 08:00 local twice a year
+against the one thing it is timed for.
+
+**The scheduler knows nothing about its peers,** so a second instance would run
+every job a second time. That is harmless for the purge (running it twice
+deletes nothing the first pass left) and was never harmless for the digest: two
+emails per subscriber.
+
+**And "one instance" is false on every deploy.** Railway starts the new
+container, waits for its health check, and only then drains the old one, so two
+processes briefly share the same schedule — the ordinary way this application
+ships, not something that needs anybody to scale up.
+
+So **the digest takes a PostgreSQL advisory lock** (`shared/lock/JobLockService`)
+and the loser of it does nothing. ADR-012 was revised rather than worked around;
+it originally said not to implement a lock yet, which was right while the purge
+was the only job. The lock is a session-level advisory lock rather than
+ShedLock, chosen on one argument: a row-based lock cannot be released by a
+process that died, so it needs a `lockAtMostFor` duration that is a guess, and
+both ways of guessing wrong reintroduce a bug — too short and the second
+process starts mid-send, too long and a killed container blocks tomorrow's run.
+An advisory lock is held by the connection, so a dead process releases it with
+no parameter to tune.
+
+**Still worth not doing: deploying within a few minutes of either job.** A lock
+makes a second instance safe, not useful — the loser does nothing at all, so a
+deploy landing exactly on 07:00 Europe/Sofia can still mean the digest is run by
+a container that is about to be drained.
+
+### Seeing the digest locally
+
+The digest is the one email you cannot produce by using the site. In the `dev`
+profile only, `POST /dev/digest` runs it now; it is a 404 in production, because
+the controller is `@Profile("dev")` and the deployed jar starts with no profile.
+
+A freshly confirmed account's watermark is `now` by design, so its first digest
+is empty — rewind it first:
+
+```bash
+docker compose exec -T db psql -U app -d fivegoodmins -c "update app_user set last_digest_sent_at = now() - interval '1 year'"
+```
+
+Then trigger it (CSRF applies, so fetch a token first) and read the result in
+Mailpit at <http://localhost:8025>:
+
+```bash
+CSRF=$(curl -s -c /tmp/jar localhost:8080/login | grep -o 'name="_csrf" value="[^"]*"' | sed 's/.*value="//;s/"//') && curl -s -b /tmp/jar -X POST localhost:8080/dev/digest -H "X-CSRF-TOKEN: $CSRF"
+```
+
+It answers with the run's four counts, e.g.
+`{"subscribers":1,"sent":1,"nothingNew":0,"failed":0}`.
 
 ---
 

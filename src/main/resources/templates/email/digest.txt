@@ -1,0 +1,16 @@
+[(#{email.digest.greeting(${displayName})})]
+
+[(#{email.digest.intro(${#lists.size(actions)})})]
+[# th:each="action : ${actions}"]
+[(#{${'action.type.' + action.actionType}})]: [(${action.title})]
+[(${#strings.abbreviate(action.excerpt, 140)})]
+[# th:each="category, i : ${action.categories}"][# th:unless="${i.first}"], [/][(#{${'category.' + category}})][/] | [# th:each="region, i : ${action.regions}"][# th:unless="${i.first}"], [/][(#{${'region.' + region}})][/]
+[/]
+[(#{email.digest.cta})]: [(${actionsUrl})]
+
+--
+[(#{email.digest.unsubscribe.before})]
+[(${unsubscribeUrl})]
+
+[(#{email.footer.automated})]
+[(${siteUrl})]

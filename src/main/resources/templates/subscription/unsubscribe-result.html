@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!--/*
+  Page 9 of the frontend brief, second half: what the POST renders. STRUCTURAL
+  PLACEHOLDER -- the design is the frontend contributor's.
+
+  TWO STATES, and the second is not an error page.
+
+   * unsubscribed = true  -- done. Reassuring, and it says what will still
+     happen: the account and everything in it are untouched, only the daily
+     email stops. Somebody who clicked an unsubscribe link in a hurry should
+     not be left wondering whether they have deleted their account.
+   * unsubscribed = false -- the token did not verify, or it verified against
+     an account that no longer exists. ONE state for both, deliberately
+     (SubscriptionService.unsubscribe): distinguishing them on screen would
+     tell whoever is holding a forged token which half of their guess was
+     wrong.
+
+  WHAT MUST SURVIVE A REDESIGN.
+
+   * The dead-link state must not read as "something went wrong, try again" --
+     there is nothing to retry. The useful thing it can say is that an account
+     whose row is gone receives no email either way, which is the actual
+     reassurance, and that signing in is where preferences live if they do
+     still have an account.
+   * No link back to /unsubscribe, with or without the token. There is nothing
+     to repeat: success is idempotent and failure is permanent.
+   * <main> keeps id="main", or the layout's skip link points at nothing.
+
+  Rendered rather than redirected to, which is the opposite of the preferences
+  page. A signed-out reader has nowhere to be redirected to, and carrying the
+  token through a redirect in order to show a result would put it in a second
+  URL -- in browser history and in any referrer header. The POST answers
+  directly and the token stays in a request body.
+*/-->
+<html th:replace="~{layout :: page(#{subscription.unsubscribe.title}, ~{::main})}"
+      xmlns:th="http://www.thymeleaf.org">
+<body>
+<main id="main" tabindex="-1">
+
+    <div th:if="${unsubscribed}">
+        <h1 th:text="#{subscription.unsubscribe.done.heading}">You are unsubscribed</h1>
+        <p th:text="#{subscription.unsubscribe.done.body}">The daily digest will stop. Your account
+            is unchanged.</p>
+        <p>
+            <span th:text="#{subscription.unsubscribe.done.resubscribe}">Changed your mind?</span>
+            <a th:href="@{/preferences}" th:text="#{subscription.unsubscribe.alternativeLink}">Change
+                your preferences</a>
+        </p>
+    </div>
+
+    <div th:unless="${unsubscribed}">
+        <h1 th:text="#{subscription.unsubscribe.deadLink.heading}">This link no longer works</h1>
+        <p th:text="#{subscription.unsubscribe.deadLink.body}">The link may be damaged, or the
+            account it belonged to no longer exists -- in which case it receives no email
+            anyway.</p>
+        <p>
+            <span th:text="#{subscription.unsubscribe.deadLink.signIn}">Still have an account?</span>
+            <a th:href="@{/login}" th:text="#{subscription.unsubscribe.deadLink.signInLink}">Log
+                in</a>
+        </p>
+    </div>
+
+</main>
+</body>
+</html>

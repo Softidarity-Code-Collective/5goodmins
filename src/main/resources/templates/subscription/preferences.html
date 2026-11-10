@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<!--/*
+  Page 13 of the frontend brief: subscription preferences. STRUCTURAL
+  PLACEHOLDER -- unstyled on purpose, the design is the frontend
+  contributor's. What the brief asks for and this does not have: any grouping
+  of thirty regions into something a person can scan, a search or filter over
+  them, and the "select all / none" affordances a list that long needs.
+
+  WHAT MUST SURVIVE A REDESIGN.
+
+   * Every checkbox name stays `categories` / `regions` and the value stays the
+     enum constant. That pair is what Spring binds into SubscriptionForm, and
+     the constants are the database's values too (ck_subscription_category_value).
+   * The lists come from TaxonomyModel, the @ControllerAdvice that puts all
+     four vocabularies on every model -- never from T(...) in the template --
+     so adding a category is an enum constant plus two properties lines and no
+     template change (ADR-008, ADR-017).
+   * The labels come from the bundle under a key built from the constant:
+     category.X and region.X. Never the constant itself on screen.
+   * EMPTY MEANS EVERYTHING, and the page has to say so. A user who ticks
+     nothing is subscribed to every category, not to none (ADR-023) -- it is
+     the single most surprising thing about this form, and a hint that explains
+     it is the difference between a sensible default and a form that looks
+     broken. subscription.preferences.allHint is that sentence; it must not be
+     dropped as decoration.
+   * The digest checkbox is the opt-out this page shares with the unsubscribe
+     link in every digest email. Unticking it here and following that link do
+     the same thing to the same column.
+   * <main> keeps id="main", or the layout's skip link points at nothing.
+
+  The form action is the literal path, as every other template in this
+  codebase writes it (@{/login}, @{/register}): SubscriptionPaths is a compile-time
+  constant for the Java side, and reading a static field from a template would
+  need T(...) -- which TaxonomyModel's own notes reject, because it names a Java
+  class with no compiler to notice a package rename. The test is what ties the
+  two together: PreferencesWebTest posts to SubscriptionPaths.PREFERENCES, so a
+  path that changes on one side only fails there.
+
+  No th:object/th:field on the checkbox groups: th:field on a checkbox bound to
+  a Set renders the checked state by testing membership, which is what is
+  wanted -- but it also generates its own ids and a hidden companion field per
+  box, and for sixty boxes that is markup nobody can style. The checked state
+  is tested explicitly below instead, which is three attributes and no
+  surprises.
+*/-->
+<html th:replace="~{layout :: page(#{subscription.preferences.title}, ~{::main})}"
+      xmlns:th="http://www.thymeleaf.org">
+<body>
+<main id="main" tabindex="-1">
+
+    <h1 th:text="#{subscription.preferences.heading}">Subscription preferences</h1>
+    <p th:text="#{subscription.preferences.intro}">Choose what you want to hear about.</p>
+
+    <form th:action="@{/preferences}" method="post">
+
+        <!--/*
+          The digest switch first, because it governs whether anything below it
+          matters: a reader who wants to stop the email entirely should not
+          have to scroll past thirty regions to find out they can.
+        */-->
+        <fieldset>
+            <legend th:text="#{subscription.preferences.digest.legend}">Daily digest</legend>
+            <label>
+                <input type="checkbox" name="digestEnabled" value="true"
+                       th:checked="${form.digestEnabled}">
+                <span th:text="#{subscription.preferences.digest.label}">Send me the daily digest</span>
+            </label>
+            <p th:text="#{subscription.preferences.digest.hint}">One email each morning, only when
+                there is something new.</p>
+        </fieldset>
+
+        <fieldset>
+            <legend th:text="#{subscription.preferences.categories.legend}">Categories</legend>
+            <!--/*
+              The sentence that explains the empty set. Repeated for regions
+              below rather than stated once at the top, because the two
+              selections are independent and a reader skimming one fieldset
+              should not have to have read the other.
+            */-->
+            <p th:text="#{subscription.preferences.allHint}">Tick nothing to receive everything.</p>
+            <ul>
+                <li th:each="category : ${categories}">
+                    <label>
+                        <input type="checkbox" name="categories"
+                               th:value="${category}"
+                               th:checked="${form.categories.contains(category)}">
+                        <span th:text="#{${'category.' + category}}">Nature</span>
+                    </label>
+                </li>
+            </ul>
+        </fieldset>
+
+        <fieldset>
+            <legend th:text="#{subscription.preferences.regions.legend}">Regions</legend>
+            <p th:text="#{subscription.preferences.allHint}">Tick nothing to receive everything.</p>
+            <!--/*
+              All thirty, in the enum's declaration order -- which TaxonomyModel
+              deliberately does not sort, because sorting would sort by the
+              English identifiers and put NATIONAL in the middle of the oblasti
+              rather than at the end.
+            */-->
+            <ul>
+                <li th:each="region : ${regions}">
+                    <label>
+                        <input type="checkbox" name="regions"
+                               th:value="${region}"
+                               th:checked="${form.regions.contains(region)}">
+                        <span th:text="#{${'region.' + region}}">Varna</span>
+                    </label>
+                </li>
+            </ul>
+        </fieldset>
+
+        <button type="submit" th:text="#{subscription.preferences.submit}">Save</button>
+    </form>
+
+</main>
+</body>
+</html>

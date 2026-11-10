@@ -26,6 +26,34 @@ class ActionRepositoryTest {
 
     private static final Instant NOW = Instant.parse("2026-10-11T09:00:00Z");
 
+    /**
+     * Every fixture's {@code ends_at}, and the one value in this class that
+     * comes from the REAL clock rather than from {@link #NOW}.
+     *
+     * <p>{@code ck_action_ends_at_after_created} compares {@code ends_at}
+     * against {@code created_at}, which is Hibernate's
+     * {@code @CreationTimestamp} -- ADR-019's stated exception, and not
+     * something a test can set. An {@code ends_at} built from a hardcoded
+     * instant is therefore a fixture with a shelf life, and this one expired:
+     * written as {@code NOW.plus(30, DAYS)} with {@code NOW} at 2026-10-11, it
+     * put every {@code ends_at} in this class at 2026-11-10 11:00, so from that
+     * moment every test here failed with a constraint violation that named
+     * neither the date nor the fixture. Found by a branch merging main, not by
+     * a change to this file.
+     *
+     * <p>The lesson was already written down in
+     * {@link #listsOnlyPublishedActionsThatHaveNotEnded}, which gets it right
+     * and says why -- "an already-expired row simply cannot be inserted". This
+     * is that applied to the fixtures that had not been.
+     *
+     * <p>A year out, so it clears {@code created_at} by a wide margin while
+     * staying in the future of {@link #NOW}, which is what the
+     * {@code endsAt > :now} predicate needs. {@code NOW} stays for everything
+     * the tests actually reason about: publication order, watermarks, tie
+     * breaking.
+     */
+    private static final Instant ENDS_AT = Instant.now().plus(365, ChronoUnit.DAYS);
+
     @Autowired ActionRepository actions;
     @Autowired AppUserRepository users;
     @Autowired EntityManager em;
@@ -34,9 +62,28 @@ class ActionRepositoryTest {
         return users.save(new AppUser(email, "{bcrypt}x", "Georgi", NOW));
     }
 
+    /**
+     * {@code ends_at} comes from the REAL clock, not from {@link #NOW}, and
+     * that is the one column in this fixture that has to.
+     *
+     * <p>{@code ck_action_ends_at_after_created} compares it against
+     * {@code created_at}, which is Hibernate's {@code @CreationTimestamp} --
+     * the real clock, one of ADR-019's two stated exceptions, and not something
+     * a test can set. So an {@code ends_at} derived from a hardcoded instant is
+     * a fixture with an expiry date: this read {@code NOW.plus(30, DAYS)} with
+     * {@code NOW} at 2026-10-11, which meant every test in this class began
+     * failing on 2026-11-10 at 11:00 with a constraint violation that named
+     * neither the date nor the fixture.
+     *
+     * <p>The lesson was already written down forty lines below, by the one test
+     * here that gets it right -- "an already-expired row simply cannot be
+     * inserted" -- and this helper was the place it had not been applied.
+     * {@link #NOW} stays for everything the tests actually reason about;
+     * only the column the database compares against its own clock follows that
+     * clock.
+     */
     private Action action(AppUser author, String title) {
-        return new Action(author, title, "opisanie", ActionType.PETITION,
-                NOW.plus(30, ChronoUnit.DAYS));
+        return new Action(author, title, "opisanie", ActionType.PETITION, ENDS_AT);
     }
 
     @Test
@@ -218,7 +265,7 @@ class ActionRepositoryTest {
     void returnsProjectionsRatherThanEntities() {
         AppUser author = author("projection@seed.example");
         Action saved = published(author, "Spasi gorata nad Sofia",
-                NOW.minus(1, ChronoUnit.DAYS), NOW.plus(30, ChronoUnit.DAYS));
+                NOW.minus(1, ChronoUnit.DAYS), ENDS_AT);
         em.clear();
 
         // The shape matters as much as the content: four columns, no author and
@@ -233,7 +280,7 @@ class ActionRepositoryTest {
     @Test
     void ordersNewestFirstByPublicationRatherThanByCreation() {
         AppUser author = author("order@seed.example");
-        Instant ends = NOW.plus(30, ChronoUnit.DAYS);
+        Instant ends = ENDS_AT;
 
         // Created in one order, published in another -- which is the ordinary
         // case, because an admin approves a queue in whatever order they like.
@@ -258,7 +305,7 @@ class ActionRepositoryTest {
     void breaksATieOnIdSoTheOrderIsNotTheDatabasesChoice() {
         AppUser author = author("tie@seed.example");
         Instant sameMoment = NOW.minus(1, ChronoUnit.HOURS);
-        Instant ends = NOW.plus(30, ChronoUnit.DAYS);
+        Instant ends = ENDS_AT;
 
         Action first = published(author, "Parva", sameMoment, ends);
         Action second = published(author, "Vtora", sameMoment, ends);
@@ -272,7 +319,7 @@ class ActionRepositoryTest {
     @Test
     void capsTheResultAtTheRequestedLimit() {
         AppUser author = author("limit@seed.example");
-        Instant ends = NOW.plus(30, ChronoUnit.DAYS);
+        Instant ends = ENDS_AT;
         for (int i = 1; i <= 8; i++) {
             published(author, "Akcia " + i, NOW.minus(i, ChronoUnit.HOURS), ends);
         }
@@ -308,7 +355,7 @@ class ActionRepositoryTest {
         AppUser author = author("excerpt@seed.example");
         String paragraph = "Дълго описание. ".repeat(300);
         Action action = new Action(author, "Дълга акция", paragraph,
-                ActionType.PETITION, NOW.plus(30, ChronoUnit.DAYS));
+                ActionType.PETITION, ENDS_AT);
         action.publish(NOW.minus(1, ChronoUnit.HOURS));
         actions.saveAndFlush(action);
         em.clear();
@@ -324,7 +371,7 @@ class ActionRepositoryTest {
     @Test
     void leavesAShortDescriptionWhole() {
         AppUser author = author("short@seed.example");
-        published(author, "Кратка акция", NOW.minus(1, ChronoUnit.HOURS), NOW.plus(30, ChronoUnit.DAYS));
+        published(author, "Кратка акция", NOW.minus(1, ChronoUnit.HOURS), ENDS_AT);
         em.clear();
 
         assertThat(actions.findNewestActive(NOW, ActionSummary.EXCERPT_CHARS, Limit.of(5)).getFirst().excerpt())
