@@ -1,8 +1,8 @@
 # Frontend Brief — 5 Good Minutes (5goodmins.com)
 
-For the frontend contributor. Read alongside `ARCHITECTURE.md`; where the two
+For Geri. Read alongside `ARCHITECTURE.md`; where the two
 disagree, `ARCHITECTURE.md` wins and this file gets corrected. Last reconciled
-against ARCHITECTURE.md Rev 28 (2026-11-05): **the repository is now set up for
+against ARCHITECTURE.md Rev 31 (2026-11-06): **the repository is now set up for
 you to start.** One Compose command runs everything, templates and CSS reload
 on save, the static asset paths exist and are served, htmx is vendored and
 wired to the CSRF token, the Content-Security-Policy is decided (section 1 —
@@ -93,7 +93,10 @@ So the work that is genuinely unblocked right now is:
 2. The base layout and the fragments in section 5. Four of them already exist
    as unstyled placeholders (layout, flash) or as lists on the style guide
    page (badges); the rest are yours from scratch.
-3. The six pages that exist, plus the error pages — including `error/429.html`, which the rate limiter already refuses through and which nobody has written.
+3. The six pages that exist, plus the five error pages — the four named
+   statuses and the fallback at `templates/error.html`. All five are
+   structural placeholders with their copy written; the design is what is
+   missing, not the strings.
 4. The two built email templates.
 5. Wireframes for the action list and detail pages, which is where the design
    is actually decided, against the seed content described in section 3.
@@ -110,10 +113,19 @@ freely.
   formatter, and no strings for "ends in 3 days". Page 2 and page 12 need
   them; they arrive with the action list rather than before it. Leave a slot,
   do not invent a format.
-- **The filter and pagination URL contract** for page 1 — which parameters,
-  which htmx target, which fragment comes back. Decided when that controller
-  is written; it will follow the shape the style guide's htmx button already
-  demonstrates.
+- ~~**The filter and pagination URL contract** for page 1.~~ **Decided in
+  full: ADR-022.** Parameters, facet semantics, the swap target and the
+  fragment name are in that ADR; page 1's row below is the short version. The
+  two answers that change what you draw: **facets are multi-select**, so the
+  sidebar is checkboxes rather than dropdowns and the active-filter summary
+  can hold a dozen chips; and **pagination is numbered pages**, so the
+  pagination fragment is page numbers rather than a "load more" button.
+- **`/` does not work yet, and it is the first thing you will type.** There is
+  no mapping for the root, so an anonymous visit to the domain lands on the
+  login form. ADR-022 decides the answer — a `302` to `/actions`, plus `/`
+  added to the permitted paths in `SecurityConfig`, because without that half
+  the redirect never runs — and both arrive with the listing controller. Until
+  then, go to `/actions` directly.
 - **Images.** ADR-006 settled on storage in Postgres served through a
   controller, but neither the table nor the upload exists yet. Section 7's
   default — text-only cards, one featured action with an image — is what to
@@ -316,7 +328,7 @@ valid title.
 
 | # | Page | Notes |
 |---|---|---|
-| 1 | **Action list / home** | *Placeholder built, everything that makes it page 1 is not.* The main page. Filters: category, region, type, free-text search. Sorted newest first, paginated. Filter changes swap the results list via htmx without a full reload. Needs: filter sidebar (drawer on mobile), result card, pagination, empty state, and an active-filter summary that can be cleared. **What exists today** is an unstyled list of the newest twenty published actions at `/actions`, built because the welcome email needs a destination (ADR-005) — no filters, no search, no htmx swapping, no pagination, and titles that are not yet links because the detail page is page 2. Those are absent rather than stubbed: a filter control that silently does nothing is worse than none. |
+| 1 | **Action list / home** | *Placeholder built, everything that makes it page 1 is not — but the URL contract now is (ADR-022).* The main page. Filters: category, region, type, free-text search. Sorted newest first, paginated. Filter changes swap the results list via htmx without a full reload. Needs: filter sidebar (drawer on mobile), result card, pagination, empty state, and an active-filter summary that can be cleared. **The contract to build against:** `GET /actions?category=&region=&type=&q=&page=` — repeatable parameters carrying enum constant names (`HUMAN_RIGHTS`, never the label), target `#action-results`, swap `innerHTML`, fragment `action/list :: results`, `hx-push-url="true"`, and the same route serves the fragment when htmx asks. Facets are **multi-select checkboxes** (OR within a facet, AND across), pagination is **numbered pages**, and results are newest-first except with a search term, where they come back by relevance. The filter form is a real `<form method="get">` with `hx-get` on the form, so it works with htmx absent. The sidebar stays **outside** the swap (re-rendering it mid-keystroke moves focus); the active-filter summary goes **inside** it, so it cannot disagree with the results. **What exists today** is an unstyled list of the newest twenty published actions at `/actions`, built because the welcome email needs a destination (ADR-005) — no filters, no search, no htmx swapping, no pagination, and titles that are not yet links because the detail page is page 2. Those are absent rather than stubbed: a filter control that silently does nothing is worse than none. |
 | 2 | **Action detail** | Title, category/region/type badges, full description, image, optional embedded video, author link, end date with remaining time, and a prominent outbound call-to-action button ("Sign the petition" etc., label depends on type). **The link is optional — needs a second variant with no CTA button at all.** Secondary: share, report. |
 | 3 | **Poster profile** | Display name, bio, website link, list of that poster's published actions. |
 | 4 | **About** | Static content page. |
@@ -354,7 +366,7 @@ valid title.
 
 | # | Page | Notes |
 |---|---|---|
-| 19 | **404 / 403 / 500 / 429** | *404, 403 and 500 built, design yours; 429 is not built.* Real pages in the site layout, not stack traces, at `templates/error/<status>.html` — the filename is what Spring Boot resolves, so renaming the file is what breaks it. 404 matters: deleted actions land here from old digest links, and from the welcome email, whose action links point at page 2 before page 2 exists. **429 is the missing one:** the rate limiter on `/login` and `/register` (ADR-002) refuses through the error dispatch with a `Retry-After` header, precisely so that it inherits this page instead of carrying a user-facing string in Java — but `error/429.html` does not exist yet, so a rate-limited user still gets the whitelabel page. It needs copy as well as a layout: what happened, and that it will work again shortly. Caveat on all four: until more public paths are named in `SecurityConfig`, an unknown URL redirects an anonymous visitor to the login form instead of reaching the 404 page. |
+| 19 | **404 / 403 / 500 / 429 / fallback** | *All five built, design yours.* **There are five, not four:** `templates/error.html` is the fallback every other status resolves to — a 405 from a crawler, a 415, a 400 from a hand-edited query parameter — and it lives at the templates root rather than in `error/`, because that is the one Boot resolves by view name. Style it with the others; it is the page an unanticipated status gets. Real pages in the site layout, not stack traces, at `templates/error/<status>.html` — the filename is what Spring Boot resolves, so renaming the file is what breaks it. 404 matters: deleted actions land here from old digest links, and from the welcome email, whose action links point at page 2 before page 2 exists. **429 is the odd one and worth reading before you restyle it:** it is the only error page reached by a POST rather than a link, because the rate limiter on `/login` and `/register` (ADR-002) refuses through the error dispatch with a `Retry-After` header, precisely so the user-facing string lives in the bundle rather than in Java. Its copy deliberately names **no interval** — the reason is in ADR-002 and it is a security one. Do not add a countdown or a "try again in N minutes" to the design. Caveat on all four: until more public paths are named in `SecurityConfig`, an unknown URL redirects an anonymous visitor to the login form instead of reaching the 404 page. |
 | 20 | **Report an action** | Small form: reason (select, includes "no longer live") + optional text. Modal or small page, submitted via htmx. |
 
 ### Emails (4)
@@ -526,7 +538,7 @@ against the short ones.
 
 ## 8. Ways of working — your call
 
-These are the contributor's decisions, with context rather than instructions.
+These are Geri's decisions, with context rather than instructions.
 
 **Templates or mockups.** Either deliver Thymeleaf templates directly, or
 deliver flat HTML/CSS that Georgi converts. Direct templates avoid a

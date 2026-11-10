@@ -51,7 +51,7 @@ Next, in order:
 
 - Page 1 proper: filters, search, paging and the htmx swapping, over the
   placeholder listing that is there now
-- Templates and the design system (a frontend contributor — see
+- Templates and the design system (Geri — see
   `docs/FRONTEND-BRIEF.md`)
 - Submitting actions and the admin approval queue
 - Page 2, the action detail page — which is also what the digest and the welcome
@@ -285,8 +285,9 @@ household 2^64 buckets. Buckets live in memory, so **every deploy resets
 them** — accepted for one instance, and the thing to fix alongside the
 scheduler if a second ever exists.
 
-A refusal is `429` with `Retry-After`, through the error dispatch, so it will
-inherit the real error page when that is built.
+A refusal is `429` with `Retry-After`, through the error dispatch, so it
+inherits `templates/error/429.html` like any other error page. The page names
+no interval on purpose: see ADR-002.
 
 **If login breaks for everybody, look here first.** The key depends on Tomcat's
 `RemoteIpValve` resolving past Cloudflare's edge to the real client. If it ever
