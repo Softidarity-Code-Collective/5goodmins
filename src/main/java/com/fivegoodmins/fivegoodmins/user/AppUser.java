@@ -59,20 +59,20 @@ public class AppUser {
     // are not redundant: the column default covers rows written by SQL, this
     // covers rows Hibernate inserts -- which is every registration, because
     // Hibernate names every mapped column in its INSERT and would otherwise
-    // send false. A new account must be subscribed (ADR-022).
+    // send false. A new account must be subscribed (ADR-023).
 
     @Column(nullable = false, length = 2)
     private String locale = "bg";
 
     // -----------------------------------------------------------------------
-    // What this user follows (ADR-022). Two element collections on an entity
+    // What this user follows (ADR-023). Two element collections on an entity
     // in user/, for a feature that lives in subscription/ -- which is a bent
     // package boundary and a deliberate one.
     //
     // JPA requires the entity owning an @ElementCollection to be the one whose
     // primary key the collection table references, and both tables are keyed
     // on app_user.id. The alternative was a `subscription` row per user to own
-    // them, rejected in ADR-022 because that row would not exist until someone
+    // them, rejected in ADR-023 because that row would not exist until someone
     // visited the preferences page, which puts "what does an absent row mean?"
     // into the nightly job's subscriber query. Everything else about these two
     // sets -- the defaulting, the preferences page, the matching rule -- is in
@@ -85,7 +85,7 @@ public class AppUser {
     // does not load this entity at all -- it reads projections -- and the
     // preferences page loads them inside its transaction.
     //
-    // An EMPTY SET MEANS EVERY VALUE, not none (ADR-022). That substitution
+    // An EMPTY SET MEANS EVERY VALUE, not none (ADR-023). That substitution
     // happens in SubscriptionService, not here: an accessor that returned the
     // whole enum for an empty collection would be a getter that lies about the
     // rows, and the preferences page needs the real selection in order to tick
@@ -296,7 +296,7 @@ public class AppUser {
      * The categories this user follows, as stored. Possibly empty, which means
      * every category rather than none -- {@code SubscriptionService} is where
      * that substitution happens, because the preferences page needs the real
-     * selection and the digest needs the effective one (ADR-022).
+     * selection and the digest needs the effective one (ADR-023).
      *
      * <p>Mutable, and the preferences page replaces its contents rather than
      * assigning a new set, so Hibernate tracks the collection it created.

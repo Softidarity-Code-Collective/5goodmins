@@ -8,7 +8,7 @@ import java.util.Set;
 
 /**
  * What one subscriber's digest is allowed to contain: the categories and
- * regions an action must match (ADR-022).
+ * regions an action must match (ADR-023).
  *
  * <p><strong>These sets are always non-empty, and that is the whole point of
  * this type.</strong> A user who has never opened the preferences page has no

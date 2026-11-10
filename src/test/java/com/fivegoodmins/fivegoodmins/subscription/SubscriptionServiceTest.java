@@ -81,7 +81,7 @@ class SubscriptionServiceTest {
     }
 
     // ------------------------------------------------------------------
-    // The default, which is the product decision in ADR-022
+    // The default, which is the product decision in ADR-023
     // ------------------------------------------------------------------
 
     @Test
@@ -107,7 +107,7 @@ class SubscriptionServiceTest {
     void readsAnEmptySelectionAsEveryValue() {
         SubscriptionFilter effective = subscriptions.effectiveFilterFor(reader.getId());
 
-        // The substitution ADR-022 turns on. Read the other way -- empty means
+        // The substitution ADR-023 turns on. Read the other way -- empty means
         // nothing matches -- every registrant who never opened the preferences
         // page would be subscribed to a digest that silently matched nothing
         // forever, and the welcome email's promise would be false for most

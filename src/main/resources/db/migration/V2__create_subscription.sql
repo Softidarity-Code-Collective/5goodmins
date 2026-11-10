@@ -1,7 +1,7 @@
 -- V2__create_subscription.sql
 --
 -- What a user follows, and whether they want the daily digest at all
--- (ADR-005, ADR-022).
+-- (ADR-005, ADR-023).
 --
 -- Conventions are V1's (ARCHITECTURE.md §2): singular snake_case, every
 -- constraint named, enums as varchar + CHECK rather than a native ENUM type,
@@ -10,7 +10,7 @@
 -- Flyway wraps the file in one transaction, so either all four statements
 -- apply or none does.
 --
--- THE SHAPE, AND WHAT WAS REJECTED (ADR-022). Two collection tables keyed on
+-- THE SHAPE, AND WHAT WAS REJECTED (ADR-023). Two collection tables keyed on
 -- the user, plus one boolean on app_user. The alternative was a `subscription`
 -- row per user owning both collections and the flag, and it was rejected for
 -- one reason: that row would not exist until a user visited the preferences
@@ -19,7 +19,7 @@
 -- coalesce. A NOT NULL column with a DEFAULT answers that question once, in
 -- the schema, for every row that exists today and every row added later.
 --
--- The cost is on the Java side and is recorded in ADR-022: JPA requires the
+-- The cost is on the Java side and is recorded in ADR-023: JPA requires the
 -- entity owning an @ElementCollection to be the one whose primary key the
 -- collection table references, so these two tables hang off AppUser in
 -- `user/` while everything else about them lives in `subscription/`.
@@ -61,7 +61,7 @@ ALTER TABLE app_user
 --
 -- ZERO is a legal and meaningful number here, unlike action_category where one
 -- to three is the rule. An empty set means "no filter", which the digest reads
--- as every category rather than as none -- see ADR-022 for why that direction
+-- as every category rather than as none -- see ADR-023 for why that direction
 -- and not the other, and for where the substitution happens. There is
 -- therefore no minimum to enforce and no maximum either: ten rows is the whole
 -- vocabulary, which is a complete selection rather than an abusive one.
@@ -121,7 +121,7 @@ CREATE TABLE subscription_region (
             -- nothing local, and it is a subscription like any other: the
             -- digest matches a subscriber's region against the action's, so an
             -- action tagged NATIONAL reaches exactly the people who asked for
-            -- it, and is not broadcast to everyone (ADR-022).
+            -- it, and is not broadcast to everyone (ADR-023).
             'NATIONAL', 'INTERNATIONAL'))
 );
 

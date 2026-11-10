@@ -132,7 +132,7 @@ class PreferencesWebTest {
 
     @Test
     void saysThatTickingNothingMeansEverything() throws Exception {
-        // The most surprising thing about this form (ADR-022). Without the
+        // The most surprising thing about this form (ADR-023). Without the
         // sentence, a page with sixty empty checkboxes and a live digest looks
         // broken -- so this string is not decoration and the test says so.
         mockMvc.perform(get(SubscriptionPaths.PREFERENCES).with(user(principal)))

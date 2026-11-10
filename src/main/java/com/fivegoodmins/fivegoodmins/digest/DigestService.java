@@ -185,7 +185,7 @@ public class DigestService {
                     // The one place "an empty selection means everything" is
                     // decided lives in subscription/, and the digest asks for
                     // it rather than reimplementing it in the query that
-                    // matters most (ADR-022).
+                    // matters most (ADR-023).
                     subscriptions.effectiveFilterFor(subscriber.id()));
 
             if (actions.isEmpty()) {

@@ -20,7 +20,7 @@ import java.util.Set;
  * made it.
  *
  * @param categories   as stored. Empty means no filter, which the digest reads
- *                     as every category (ADR-022).
+ *                     as every category (ADR-023).
  * @param regions      as stored. Empty means no filter.
  * @param digestEnabled whether the nightly email is wanted at all. The
  *                     unsubscribe link writes this same flag without a login.

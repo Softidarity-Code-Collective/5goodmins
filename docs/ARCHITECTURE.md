@@ -53,7 +53,7 @@ Everything Rev 1 got right is kept and marked **Accepted**. The rest is marked *
 | 19 | Time enters through one injected `Clock`; no `Instant.now()` in place | New (Rev 13) |
 | 20 | Content-Security-Policy `default-src 'self'`; static assets and htmx self-hosted | New (Rev 25) |
 | 21 | Demo seed data ships to every environment as `V100__`; only the test config omits it | New (Rev 25), corrected (Rev 26–27) |
-| 22 | Subscription model: two collection tables + a boolean; an empty selection means everything | New (Rev NN) |
+| 22 | Subscription model: two collection tables + a boolean; an empty selection means everything | New (Rev 32) |
 | 5b | Dev mail: Mailpit behind an `EmailSender` interface; PostgreSQL pinned to 18 | Resolved (Rev 9) |
 
 ---
@@ -401,7 +401,7 @@ Four more things settled by building it (Rev 16):
 
 **Interview point.** "What happens if the email fails?" is the follow-up, and the answer has four parts in this order: the account stays, because it is correct and the provider's bad afternoon is not the user's fault; the failure is logged with the user id, both for a send that threw and for a queue that rejected; the user recovers by registering again, which the page tells them to do, and which really is a resend because the row is replaced; and at scale I would move to a transactional outbox with retries. Naming the next step is what makes "I did not build retries" a decision instead of an omission. The follow-up worth having ready is "what does sending asynchronously cost you?": no rollback, no retry, a bounded queue that drops rather than grows, and a failure whose only symptom is an email that never arrives. The strongest version of that answer is the one that names the measurement — *I used `@Async` until I filled the queue and found the rejection being logged anonymously by the transaction synchronization, so I submit by hand and catch it where the account id still exists* — because it is the difference between having read about the annotation and having run it.
 
-**Also required, not optional:** a signed unsubscribe link that works without login. This is a legal requirement in the EU, not a nicety. Same signing mechanism as email verification (ADR-002). *(Rev NN: this originally said "one-click, no auth". The no-auth half stands; one-click was wrong and is corrected below under "Where ADR-005 was wrong" — a GET that unsubscribes is performed by mail-client prefetchers, not by the reader.)*
+**Also required, not optional:** a signed unsubscribe link that works without login. This is a legal requirement in the EU, not a nicety. Same signing mechanism as email verification (ADR-002). *(Rev 32: this originally said "one-click, no auth". The no-auth half stands; one-click was wrong and is corrected below under "Where ADR-005 was wrong" — a GET that unsubscribes is performed by mail-client prefetchers, not by the reader.)*
 
 **Email language.** `app_user.locale` (`bg` / `en`). The UI locale comes from a cookie, but a nightly job has no cookie, so the preference must be stored.
 
@@ -424,7 +424,7 @@ more Compose service that is never deployed.
 Never send real mail from tests: unit tests use a mock `EmailSender`, and no test
 points at Mailpit.
 
-**The digest was built in Rev NN, and six things about it are decisions or corrections rather than mechanics.**
+**The digest was built in Rev 32, and six things about it are decisions or corrections rather than mechanics.**
 
 - **The send time is 07:00 Europe/Sofia, and the zone is the reader's rather than UTC** — the opposite of the purge's choice, for the opposite reason. The purge has no deadline, so a fixed UTC hour is right and nothing about it cares. This email has a human deadline: it asks for five minutes of somebody's morning and wants to be at the top of the inbox when they first look. Pinned to UTC it would arrive at 07:00 local in winter and 08:00 in summer, drifting an hour twice a year against the one thing it is timed for. This is not the implicit-default-zone trap `UnverifiedAccountPurgeJob` warns about — that objection is to an hour that moves with whatever zone the base image has, and naming `Europe/Sofia` is as explicit as naming `UTC`. The audience is one country (ADR-008). It clears the 03:30 UTC purge by at least half an hour in either season, which matters only because the scheduler has one thread.
 - **It sends synchronously, on the scheduler thread, and not through the mail pool** — which is the opposite of `RegistrationEmailListener` and would be a bug either way round. Two reasons. The pool is one thread behind a fifty-deep queue, sized for the occasional registration: three hundred digests would fill it and the remainder would be rejected and dropped. And the watermark may only advance after a *successful* send, so the code has to know the outcome, which a fire-and-forget submit cannot report. The latency argument that puts registration email on a pool does not apply — there is no HTTP response waiting and no timing oracle, because nobody times a nightly job with a stopwatch.
@@ -620,7 +620,7 @@ Postgres treats NULLs as distinct inside a `UNIQUE` constraint, so link-less act
 
 ### ADR-012 — Scheduled jobs, and the lock that stopped being optional
 
-**Status:** New; **revised in Rev NN**, when the digest landed and the one-instance assumption stopped holding.
+**Status:** New; **revised in Rev 32**, when the digest landed and the one-instance assumption stopped holding.
 
 `@Scheduled` in the application process, with `@EnableScheduling` (`shared/SchedulingConfig`). This assumes **exactly one instance is running**. Two instances = every user gets two digests.
 
@@ -891,9 +891,9 @@ So the spread is deliberate and it is stated here rather than left to be read of
 
 ---
 
-### ADR-022 — The subscription model: what a reader follows, and what an empty selection means
+### ADR-023 — The subscription model: what a reader follows, and what an empty selection means
 
-**Status:** New (Rev NN)
+**Status:** New (Rev 32)
 
 **Decision.** Two collection tables keyed on the user — `subscription_category` and `subscription_region` — plus one boolean column, `app_user.digest_enabled`, all in `V2__create_subscription.sql`. The feature lives in `subscription/`; the digest that reads it lives in `digest/`.
 
@@ -965,7 +965,7 @@ Two requirements on its content: seeded authors use emails at `seed.example` (a 
 | Categories and types | 10 categories, 5 types — ADR-017 |
 | Email provider | **Brevo**, on free-tier limits at the time: 300/day with no monthly cap, against Resend's 100/day and Mailgun's sandbox-only free tier — ADR-005 |
 | Rate limiting | `/login` 20 per 15 min per address; `/register` 10 per hour per address (refuses the request, and is what `refuse-requests` switches off) and 3 per day per recipient (refuses the send, commits on success, has no switch) — ADR-002 |
-| Subscription model | Two collection tables keyed on the user + `app_user.digest_enabled`; **an empty selection means every value** — ADR-022 |
+| Subscription model | Two collection tables keyed on the user + `app_user.digest_enabled`; **an empty selection means every value** — ADR-023 |
 | Digest send time | 07:00 **Europe/Sofia** — the reader's zone, unlike the purge's fixed UTC hour — ADR-005 |
 | Scheduler lock | A Postgres **session-level advisory lock**, chosen over ShedLock on the `lockAtMostFor` argument — ADR-012 |
 | Unsubscribe | Signed token, no login, **GET confirms and POST acts** — one-click is wrong because mail clients prefetch — ADR-005 |
@@ -1028,7 +1028,7 @@ Full Q&A in `docs/INTERVIEW-QA.md`. The headline list:
 
 ## 8. Changelog
 
-- **Rev NN (2026-11-05):** The subscriptions and digest vertical: `V2__create_subscription.sql`, the `subscription/` and `digest/` packages, the preferences page (brief page 13), the unsubscribe flow (page 9), the daily digest email, and the scheduler lock. **New ADR-022** for the subscription model, **ADR-012 revised** because the one-instance assumption stopped holding the moment the digest existed, and **ADR-005 corrected on one point and extended with six build notes and five open points**. Three things are worth carrying out of it. *One-click unsubscribe was wrong* — this document already relies on mail clients prefetching links when it explains how the welcome email is sent exactly once, and a GET that unsubscribes is therefore performed by the prefetcher rather than the reader; the opt-out is now a GET that confirms and a POST that acts. *The one real bug was caught by running the thing, not by the tests*: `advanceWatermark` is a `@Modifying` query and the service deliberately holds no transaction, so it threw after the email had gone out — the digest delivered, the watermark unmoved, and the same actions queued to be mailed again every morning after, which is the exact failure the watermark pattern exists to prevent. Every test in the vertical was structurally unable to see it, because one mocks the repository and the rest are `@Transactional`; `DigestEndToEndTest` is deliberately not, and is the regression test. *And the demo accounts needed `V101`*: `@seed.example` addresses cannot receive mail, so defaulting them to subscribed would have hard-bounced twice a night forever against the sending reputation ADR-005 spends a week building. 394 tests green, 68 of them new.
+- **Rev 32 (2026-11-05):** The subscriptions and digest vertical: `V2__create_subscription.sql`, the `subscription/` and `digest/` packages, the preferences page (brief page 13), the unsubscribe flow (page 9), the daily digest email, and the scheduler lock. **New ADR-023** for the subscription model, **ADR-012 revised** because the one-instance assumption stopped holding the moment the digest existed, and **ADR-005 corrected on one point and extended with six build notes and five open points**. Three things are worth carrying out of it. *One-click unsubscribe was wrong* — this document already relies on mail clients prefetching links when it explains how the welcome email is sent exactly once, and a GET that unsubscribes is therefore performed by the prefetcher rather than the reader; the opt-out is now a GET that confirms and a POST that acts. *The one real bug was caught by running the thing, not by the tests*: `advanceWatermark` is a `@Modifying` query and the service deliberately holds no transaction, so it threw after the email had gone out — the digest delivered, the watermark unmoved, and the same actions queued to be mailed again every morning after, which is the exact failure the watermark pattern exists to prevent. Every test in the vertical was structurally unable to see it, because one mocks the repository and the rest are `@Transactional`; `DigestEndToEndTest` is deliberately not, and is the regression test. *And the demo accounts needed `V101`*: `@seed.example` addresses cannot receive mail, so defaulting them to subscribed would have hard-bounced twice a night forever against the sending reputation ADR-005 spends a week building. 394 tests green, 68 of them new.
 
 - **Rev 28 (2026-11-05):** The frontend-handoff branch (Revs 25–27) merged `main` (Revs 21–24), which is where the two lines of work met: the rate limiter, the Brevo transport, the welcome email and the placeholder listing at `/actions` on one side, the static assets, the Content-Security-Policy, the taxonomy labels, the error pages and the demo seed on the other. **Branch revision numbers 21–23 were renumbered to 25–27**, because both branches numbered revisions independently while they were apart and `main`'s numbering is the one other documents cite. Two things the combination changes: the deployed site is no longer an empty page, which was the open item at the bottom of Rev 21's "next" list; and **the 429 page the rate limiter refuses through still does not exist** — ADR-002 routes the refusal through the error dispatch precisely so it inherits a template, Revs 25–27 built that mechanism for 404, 403 and 500, and nobody has written `error/429.html` or its three strings. A rate-limited user gets the whitelabel page until somebody does.
 
