@@ -12,107 +12,65 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * The digest's matching query -- ADR-005's central piece of logic -- and the
- * two that fetch the badges for what it returns.
+ * The digest's matching query (ADR-005) and the two that fetch its badges.
  *
- * <p><strong>Here rather than on {@code ActionRepository}, which is a decision
- * with a cost.</strong> {@code action/ActionQueries} exists so that no other
- * feature holds {@code ActionRepository}, and the consistent thing would be a
- * digest method on it. What tipped it the other way is that this query is not
- * the action listing's shape and never will be: it takes a per-subscriber
- * watermark and two bound {@code IN} lists, it is read once a night by one
- * caller, and the rule it encodes -- what counts as new for this reader -- is
- * the digest's rule and nothing else's. Under package-by-feature (ADR-003) a
- * read model belongs to the feature that reads it.
+ * <p>Here rather than on {@code ActionRepository} because this is the digest's
+ * read model and nothing else's; the cost -- {@code digest/} knowing the shape
+ * of {@code action}'s data -- and the containment are argued in ADR-023.
+ * {@code Repository} rather than {@code JpaRepository} is that containment:
+ * three reads, no writes.
  *
- * <p>The honest cost: {@code digest/} now knows the shape of {@code action}'s
- * data, so a change to how an action is tagged touches two packages. The
- * narrowing that keeps it bearable is the same one {@code subscription/} uses
- * -- {@code Repository}, not {@code JpaRepository}, so this package can read
- * three queries' worth of {@code action} and nothing else, and cannot write to
- * it at all. If a second feature ever needs this shape, the answer is to move
- * it to {@code ActionQueries} and have both call that.
- *
- * <p><strong>Three queries, not one join.</strong> ADR-005 is explicit that
- * matching uses {@code EXISTS} rather than a join because an action tagged
- * {@code BURGAS, NATIONAL} would come back twice for a Burgas subscriber. The
- * badges reintroduce exactly that risk -- they are the rows a join would
- * duplicate on -- so they are fetched separately, keyed on the ids the first
- * query returned, and grouped in Java by {@link DigestQueries}. One extra
- * round trip per facet per subscriber, in a job that runs once a day against a
- * free tier capped at 300 sends (ADR-005).
- *
- * <p>ADR-005 weighed "a query per action or a join that returns an action once
- * per tag" and rejected both for the welcome email. This is the third option it
- * did not name: one query per <em>facet</em>, for all of that subscriber's
- * actions at once.
+ * <p><strong>Three queries, not one join.</strong> A join against the tag
+ * tables returns an action once per matching tag, so an action tagged
+ * {@code BURGAS, NATIONAL} would arrive twice for a subscriber who follows
+ * both. The badges are fetched per facet for all of that subscriber's actions
+ * at once, and grouped by {@link DigestQueries}, which also holds the
+ * transaction the three share.
  */
 interface DigestActionRepository extends Repository<Action, Long> {
 
     /**
-     * Everything one subscriber has not been told about yet and could still
-     * act on.
+     * Everything one subscriber has not been told about yet and could still act
+     * on, oldest first.
      *
-     * <p>ADR-005's query, clause for clause:
+     * <p>The clauses, and what each is for:
      *
      * <ul>
-     *   <li><strong>{@code status = PUBLISHED}</strong> -- the only status that
-     *       is ever mailed.</li>
-     *   <li><strong>{@code publishedAt > :watermark}</strong> -- strictly
-     *       greater, so the action that moved the watermark last time is not
-     *       sent twice. This is the clause that keys the digest on
-     *       {@code published_at} and never {@code created_at} or
-     *       {@code updated_at}: the first would miss every action created
-     *       before it was approved, the second would push a typo fix above
-     *       every watermark on the platform. {@code published_at} is written
-     *       exactly once ({@code Action.publish}) and that immutability is what
-     *       the whole pattern rests on.</li>
-     *   <li><strong>{@code publishedAt <= :cutoff}</strong> -- the lag window,
-     *       and the clause most likely to look redundant to somebody tidying
-     *       this up. {@code now()} is transaction start time, so a publish
+     *   <li>{@code publishedAt > :watermark} -- strictly greater, so the action
+     *       that moved the watermark last night is not sent again tonight. An
+     *       off-by-one here is a duplicate in every subscriber's inbox.</li>
+     *   <li><strong>{@code publishedAt <= :cutoff} -- the lag window, and the
+     *       clause most likely to look redundant to somebody tidying this
+     *       up.</strong> {@code now()} is transaction start time, so a publish
      *       beginning at 06:59:59 is invisible to a job starting at 07:00:00
-     *       which would then move the watermark past it; the row commits with
+     *       which would then move the watermark past it: the row commits with
      *       an earlier {@code published_at} and is never mailed to anybody,
      *       ever. Excluding the last few minutes -- and advancing the watermark
      *       only to this same cutoff -- is what closes that.</li>
-     *   <li><strong>{@code endsAt > :now}</strong> -- never mail an action that
-     *       has already expired. Derived per query; there is no
-     *       {@code EXPIRED} status and no job that sets one.</li>
-     *   <li><strong>two {@code exists} subqueries</strong> -- one per facet,
-     *       which is what stops a multiply-tagged action appearing twice and
-     *       what lets Postgres stop at the first matching tag.</li>
+     *   <li>{@code endsAt > :now} -- never mail an expired action. Derived per
+     *       query; there is no {@code EXPIRED} status.</li>
+     *   <li>two {@code exists} subqueries, one per facet, which is what stops a
+     *       multiply-tagged action appearing twice.</li>
      * </ul>
      *
-     * <p><strong>The {@code IN} lists are never empty.</strong>
-     * {@code SubscriptionFilter} substitutes the complete vocabulary for a
-     * subscriber who has chosen nothing, so this query has no "unfiltered"
-     * branch and never depends on how Hibernate renders an empty {@code IN} --
-     * which has changed between versions.
+     * <p>Keyed on {@code published_at} and never {@code created_at} or
+     * {@code updated_at} (ADR-005): it is written exactly once, by
+     * {@code Action.publish}, and that immutability is what the pattern rests
+     * on.
      *
-     * <p>The subqueries correlate on {@code a.id} rather than on the entity
-     * (<code>a2 = a</code>), which both work in HQL; the id form is the one
-     * that reads unambiguously and does not depend on how the dialect compares
-     * entity references.
+     * <p>The {@code IN} lists are never empty -- {@code SubscriptionFilter}
+     * substitutes the full vocabulary for a subscriber who chose nothing -- so
+     * there is no unfiltered branch here.
      *
-     * <p><strong>The ordering carries its tiebreaker</strong>, like every list
-     * query here: two actions published in one transaction share a
-     * {@code published_at} to the microsecond, and without {@code id} the
-     * contents of one email would vary between two identical runs. Ascending,
-     * unlike the listing -- a digest is read as "what happened since you last
-     * heard from us", which is a story told forwards.
-     *
-     * <p><strong>No {@code Limit}.</strong> A subscriber the job has not
-     * reached for a week gets the week, because truncating would drop actions
-     * the watermark then moves past -- and ADR-005's claim is precisely that
-     * nothing is missed when the job fails for two days. The practical bound is
-     * however long it has been broken; how much of it to render is the
-     * template's decision, not the query's.
+     * <p>Ascending with an id tiebreaker: a digest reads as a story told
+     * forwards, and two actions published in one transaction share a
+     * {@code published_at} to the microsecond. No {@code Limit}, because
+     * truncating would drop actions the watermark then moves past.
      *
      * @param watermark {@code app_user.last_digest_sent_at} for this subscriber
-     * @param cutoff    {@code now} minus the lag window, and also where the
-     *                  watermark will move to if the send succeeds
-     * @param now       passed in, never {@code CURRENT_TIMESTAMP} (ADR-019), so
-     *                  a test can put a day wherever it likes
+     * @param cutoff    {@code now} minus the lag window, and where the watermark
+     *                  moves if the send succeeds
+     * @param now       passed in, never {@code CURRENT_TIMESTAMP} (ADR-019)
      */
     @Query("""
             select new com.fivegoodmins.fivegoodmins.digest.DigestActionRow(
@@ -138,14 +96,11 @@ interface DigestActionRepository extends Repository<Action, Long> {
 
     /**
      * The category badges for a set of actions, as {@code (actionId, category)}
-     * pairs -- one query for every action in one subscriber's digest rather
-     * than one per action.
+     * pairs -- one query for every action in a digest rather than one per
+     * action.
      *
-     * <p>The caller must not pass an empty collection. There is no work to do
-     * for an empty digest and no email either, so {@link DigestQueries} returns
-     * before reaching here; an empty {@code IN} is the thing this codebase
-     * declines to depend on everywhere else, and that does not stop being true
-     * in a query nobody looks at.
+     * <p>The caller must not pass an empty collection; {@link DigestQueries}
+     * returns before reaching here when there is nothing to send.
      */
     @Query("""
             select new com.fivegoodmins.fivegoodmins.digest.DigestCategoryTag(a.id, c)
