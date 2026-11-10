@@ -8,16 +8,20 @@ import com.fivegoodmins.fivegoodmins.shared.token.SignedTokenService;
 import com.fivegoodmins.fivegoodmins.shared.token.TokenPurpose;
 import com.fivegoodmins.fivegoodmins.user.AppUser;
 import com.fivegoodmins.fivegoodmins.user.AppUserRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 
-import jakarta.persistence.EntityManager;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,7 +80,7 @@ class SubscriptionServiceTest {
     }
 
     /**
-     * A {@link java.time.Clock} a test can move.
+     * A {@link Clock} a test can move.
      *
      * <p>{@code SignedTokenServiceTest} has an equivalent of its own and the two
      * are deliberately not shared: it is twelve lines of trivial code, and one
@@ -84,7 +88,7 @@ class SubscriptionServiceTest {
      * thing to own than the duplication. If a third test wants one, extract it
      * then.
      */
-    static final class MovableClock extends java.time.Clock {
+    static final class MovableClock extends Clock {
 
         private volatile Instant instant;
 
@@ -102,12 +106,12 @@ class SubscriptionServiceTest {
         }
 
         @Override
-        public java.time.ZoneId getZone() {
-            return java.time.ZoneOffset.UTC;
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
         }
 
         @Override
-        public java.time.Clock withZone(java.time.ZoneId zone) {
+        public Clock withZone(ZoneId zone) {
             return this;
         }
     }
@@ -292,7 +296,7 @@ class SubscriptionServiceTest {
         String token = subscriptions.unsubscribeToken(reader.getId());
 
         // Eleven years on, past the ten-year UNSUBSCRIBE lifetime.
-        clock.moveTo(NOW.plus(java.time.Duration.ofDays(11 * 365)));
+        clock.moveTo(NOW.plus(Duration.ofDays(11 * 365)));
 
         // Deliberately honoured rather than refused, and this is the test that
         // keeps the branch from being "simplified" away. The signature is
@@ -310,7 +314,7 @@ class SubscriptionServiceTest {
 
     @Test
     void stillRefusesAnExpiredTokenThatDoesNotVerify() {
-        clock.moveTo(NOW.plus(java.time.Duration.ofDays(11 * 365)));
+        clock.moveTo(NOW.plus(Duration.ofDays(11 * 365)));
 
         // Expiry is forgiven; a bad signature is not. Otherwise "we honour
         // expired tokens" would quietly mean "we honour anything old".

@@ -50,23 +50,13 @@ public class SubscriptionService {
      * trap ADR-005 avoids with {@code EXISTS} in the digest, in the other
      * direction.
      *
-     * @throws IllegalArgumentException if there is no such account. The caller
-     *         is a controller holding an authenticated principal, so an absent
-     *         row means the account was deleted inside the lifetime of a
-     *         session -- a race rather than a case for a page.
-     *         <p><strong>Which currently renders a 500, and that is the wrong
-     *         answer</strong> (review of Rev 32). The truthful one is to end the
-     *         session and send them to the login form: the principal names a row
-     *         that no longer exists, so they are not signed in to anything. It is
-     *         deliberately not fixed here, because fixing it here would fix it
-     *         only here -- the same stale principal 500s on every other
-     *         authenticated page the moment one exists, so the repair belongs
-     *         where the staleness does: Spring Security re-checking the
-     *         {@code UserDetails} on each request, or one
-     *         {@code @ControllerAdvice} mapping this to a logout redirect for
-     *         every feature at once. A local patch in {@code subscription/}
-     *         would make the problem look solved while leaving it everywhere
-     *         else, which is worse than a 500 nobody has mistaken for correct.
+     * @throws IllegalArgumentException if there is no such account, which means
+     *         the row was deleted inside the lifetime of a session. It renders a
+     *         500 and should not: the holder of that session is signed in to
+     *         nothing and belongs at the login form. Deliberately not fixed
+     *         here, because the cause is a stale principal rather than anything
+     *         about subscriptions -- **ADR-002's open points** carry the defect
+     *         and the two candidate repairs.
      */
     @Transactional(readOnly = true)
     public SubscriptionPreferences preferencesOf(long userId) {

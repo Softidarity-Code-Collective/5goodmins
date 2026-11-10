@@ -77,7 +77,7 @@ class DigestQueries {
      */
     @Transactional(readOnly = true)
     public List<DigestAction> digestFor(Instant watermark, Instant cutoff, Instant now,
-                                       SubscriptionFilter filter) {
+                                        SubscriptionFilter filter) {
         List<DigestActionRow> rows = actions.findMatching(
                 watermark, cutoff, now,
                 filter.categories(), filter.regions(),

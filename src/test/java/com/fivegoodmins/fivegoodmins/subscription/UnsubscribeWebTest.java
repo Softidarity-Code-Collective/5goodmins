@@ -5,6 +5,7 @@ import com.fivegoodmins.fivegoodmins.shared.token.SignedTokenService;
 import com.fivegoodmins.fivegoodmins.shared.token.TokenPurpose;
 import com.fivegoodmins.fivegoodmins.user.AppUser;
 import com.fivegoodmins.fivegoodmins.user.AppUserRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,8 +15,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
-
-import jakarta.persistence.EntityManager;
 
 import java.time.Instant;
 import java.util.Locale;
