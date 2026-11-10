@@ -70,6 +70,28 @@ class DigestQueriesTest {
     /** Far enough back that everything published here is above it. */
     private static final Instant OLD_WATERMARK = NOW.minus(30, ChronoUnit.DAYS);
 
+    /**
+     * Every fixture's {@code ends_at}, and the one value here that comes from
+     * the REAL clock rather than from {@link #NOW}.
+     *
+     * <p>{@code ck_action_ends_at_after_created} compares {@code ends_at}
+     * against {@code created_at}, which is Hibernate's
+     * {@code @CreationTimestamp} -- ADR-019's stated exception, and not
+     * something a test can set. An {@code ends_at} built from a hardcoded
+     * instant is therefore a fixture with a shelf life: written as
+     * {@code NOW.plus(30, DAYS)} this file would have started failing on
+     * 2026-12-05 with a constraint violation naming neither the date nor the
+     * fixture, which is exactly what {@code ActionRepositoryTest} did on
+     * 2026-11-10 before the same fix.
+     *
+     * <p>A year out, so it clears {@code created_at} by a wide margin and is
+     * comfortably in the future of {@link #NOW} as well -- the two bounds this
+     * value has to satisfy at once, since the queries ask
+     * {@code endsAt > :now} with {@code now} pinned to {@code NOW}.
+     * {@code NOW} stays for everything the tests reason about.
+     */
+    private static final Instant ENDS_AT = Instant.now().plus(365, ChronoUnit.DAYS);
+
     /** The effective filter of a subscriber who has chosen nothing. */
     private static final SubscriptionFilter EVERYTHING = new SubscriptionFilter(
             EnumSet.allOf(Category.class), EnumSet.allOf(Region.class));
@@ -101,7 +123,7 @@ class DigestQueriesTest {
     }
 
     private Action published(String title, Instant publishedAt) {
-        return published(title, publishedAt, NOW.plus(30, ChronoUnit.DAYS),
+        return published(title, publishedAt, ENDS_AT,
                 Set.of(Category.NATURE), Set.of(Region.VARNA));
     }
 
@@ -218,7 +240,7 @@ class DigestQueriesTest {
         // question is asked on a later day.
         Action endsIn30Days = published("Deistvie s krai",
                 NOW.minus(1, ChronoUnit.HOURS),
-                NOW.plus(30, ChronoUnit.DAYS),
+                ENDS_AT,
                 Set.of(Category.NATURE), Set.of(Region.VARNA));
 
         // Before it ends: in the digest. Asserted so that the exclusion below
@@ -227,7 +249,9 @@ class DigestQueriesTest {
                 .extracting(DigestAction::id)
                 .contains(endsIn30Days.getId());
 
-        Instant afterItEnds = NOW.plus(60, ChronoUnit.DAYS);
+        // Past ENDS_AT, which is a year out from the real clock -- so this
+        // horizon is derived from the same clock rather than from NOW.
+        Instant afterItEnds = ENDS_AT.plus(1, ChronoUnit.DAYS);
         List<DigestAction> later = digests.digestFor(
                 OLD_WATERMARK, afterItEnds.minus(5, ChronoUnit.MINUTES), afterItEnds, EVERYTHING);
 
@@ -246,7 +270,7 @@ class DigestQueriesTest {
         // what fails if either ever becomes a join.
         Action multi = published("Deistvie v dva raiona",
                 NOW.minus(1, ChronoUnit.HOURS),
-                NOW.plus(30, ChronoUnit.DAYS),
+                ENDS_AT,
                 Set.of(Category.NATURE, Category.ANIMALS),
                 Set.of(Region.BURGAS, Region.NATIONAL));
 
@@ -261,7 +285,7 @@ class DigestQueriesTest {
     void requiresBothACategoryAndARegionToMatch() {
         Action natureInVarna = published("Priroda vav Varna",
                 NOW.minus(1, ChronoUnit.HOURS),
-                NOW.plus(30, ChronoUnit.DAYS),
+                ENDS_AT,
                 Set.of(Category.NATURE), Set.of(Region.VARNA));
 
         // The right category, the wrong region. AND, not OR: an OR here would
@@ -288,7 +312,7 @@ class DigestQueriesTest {
         // short-circuits on the first match, which is the behaviour here.
         Action multi = published("Deistvie v dva raiona",
                 NOW.minus(1, ChronoUnit.HOURS),
-                NOW.plus(30, ChronoUnit.DAYS),
+                ENDS_AT,
                 Set.of(Category.NATURE), Set.of(Region.BURGAS, Region.NATIONAL));
 
         assertThat(digestMatching(Set.of(Category.NATURE), Set.of(Region.NATIONAL)))
@@ -304,7 +328,7 @@ class DigestQueriesTest {
     void carriesTheBadgesTheEmailRenders() {
         Action tagged = published("Deistvie s etiketi",
                 NOW.minus(1, ChronoUnit.HOURS),
-                NOW.plus(30, ChronoUnit.DAYS),
+                ENDS_AT,
                 Set.of(Category.NATURE, Category.ANIMALS),
                 Set.of(Region.VARNA, Region.NATIONAL));
 
@@ -323,10 +347,10 @@ class DigestQueriesTest {
         // The grouping bug this guards against -- one tag set reused for every
         // row -- is invisible in a test with a single action in the digest.
         Action nature = published("Samo priroda",
-                NOW.minus(2, ChronoUnit.HOURS), NOW.plus(30, ChronoUnit.DAYS),
+                NOW.minus(2, ChronoUnit.HOURS), ENDS_AT,
                 Set.of(Category.NATURE), Set.of(Region.VARNA));
         Action political = published("Samo politika",
-                NOW.minus(1, ChronoUnit.HOURS), NOW.plus(30, ChronoUnit.DAYS),
+                NOW.minus(1, ChronoUnit.HOURS), ENDS_AT,
                 Set.of(Category.POLITICAL), Set.of(Region.BURGAS));
 
         List<DigestAction> digest = digestFrom(OLD_WATERMARK);
@@ -350,7 +374,7 @@ class DigestQueriesTest {
     @Test
     void cutsTheExcerptInSqlRatherThanReadingTheWholeDescription() {
         Action longDescription = new Action(author, "Dalgo opisanie",
-                "x".repeat(5000), ActionType.PETITION, NOW.plus(30, ChronoUnit.DAYS));
+                "x".repeat(5000), ActionType.PETITION, ENDS_AT);
         longDescription.setCategories(Set.of(Category.NATURE));
         longDescription.setRegions(Set.of(Region.VARNA));
         longDescription.publish(NOW.minus(1, ChronoUnit.HOURS));
